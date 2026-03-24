@@ -10,6 +10,8 @@ Current MVP feature:
 - Helidon configuration completion in `application.yaml` / `application.yml`
 - Hover documentation for known Helidon properties in `application.properties`
 - Hover documentation for known Helidon properties in `application.yaml` / `application.yml`
+- Conservative diagnostics for unknown Helidon configuration keys in `application.properties`
+- Conservative diagnostics for unknown Helidon configuration keys in `application.yaml` / `application.yml`
 - Helidon project generation command using Helidon Maven archetypes
 
 When editing an `application.properties` file, typing prefixes like `server.` will offer Helidon configuration keys such as:
@@ -44,6 +46,8 @@ Hover support includes:
 - property type
 - default value when known
 - example value
+
+Diagnostics currently warn only for unknown keys under known Helidon config roots such as `server`, `logging`, or `security`, which keeps custom application properties out of the warning stream.
 
 ## Metadata source
 
@@ -88,10 +92,10 @@ No custom settings yet.
 
 - The current metadata catalog is static and intentionally small.
 - The current metadata file is mocked and manually maintained.
-- Completion currently targets `application.properties` only.
-- Completion now also targets `application.yaml` and `application.yml`.
+- Completion and hover support are currently scoped to Helidon-style `application.properties`, `application.yaml`, and `application.yml` files.
 - Hover currently targets known static Helidon keys only.
-- Hover, validation, YAML support, and Java language-server integration are planned next.
+- Validation remains metadata-driven, so gaps in the metadata catalog can still miss valid keys.
+- Java language-server integration is still planned later.
 
 ## Release Notes
 

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import {
+	collectHelidonDiagnostics,
 	HelidonPropertiesCompletionProvider,
 	HelidonPropertiesHoverProvider,
 	HelidonYamlCompletionProvider,
@@ -10,6 +11,7 @@ import { generateHelidonProject } from './generator';
 
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Helidon VS Code extension is active.');
+	const diagnostics = vscode.languages.createDiagnosticCollection('helidon-vsc');
 
 	const completionProvider = vscode.languages.registerCompletionItemProvider(
 		{ language: 'properties', scheme: 'file' },
@@ -48,12 +50,38 @@ export function activate(context: vscode.ExtensionContext) {
 		await generateHelidonProject();
 	});
 
+	const refreshDiagnostics = (document: vscode.TextDocument) => {
+		const issues = collectHelidonDiagnostics(document);
+		if (issues.length === 0) {
+			diagnostics.delete(document.uri);
+			return;
+		}
+
+		diagnostics.set(document.uri, issues);
+	};
+
+	for (const document of vscode.workspace.textDocuments) {
+		refreshDiagnostics(document);
+	}
+
+	const openDocumentDiagnostics = vscode.workspace.onDidOpenTextDocument(refreshDiagnostics);
+	const changeDocumentDiagnostics = vscode.workspace.onDidChangeTextDocument((event) => {
+		refreshDiagnostics(event.document);
+	});
+	const closeDocumentDiagnostics = vscode.workspace.onDidCloseTextDocument((document) => {
+		diagnostics.delete(document.uri);
+	});
+
 	context.subscriptions.push(
+		diagnostics,
 		completionProvider,
 		yamlCompletionProvider,
 		hoverProvider,
 		helloWorldCommand,
 		generateProjectCommand,
+		openDocumentDiagnostics,
+		changeDocumentDiagnostics,
+		closeDocumentDiagnostics,
 	);
 }
 

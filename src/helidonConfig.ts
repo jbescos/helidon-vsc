@@ -14,6 +14,26 @@ export const HELIDON_CONFIG_PROPERTIES: HelidonConfigProperty[] = loadHelidonCon
 const HELIDON_CONFIG_PROPERTY_MAP = new Map(
 	HELIDON_CONFIG_PROPERTIES.map((property) => [property.key, property] as const)
 );
+const NORMALIZED_HELIDON_CONFIG_KEYS = new Set(
+	HELIDON_CONFIG_PROPERTIES.map((property) => normalizeConfigKey(property.key))
+);
+const NORMALIZED_HELIDON_CONFIG_PREFIXES = new Set(
+	HELIDON_CONFIG_PROPERTIES.flatMap((property) => configKeyPrefixes(property.key))
+);
+const HELIDON_CONFIG_ROOTS = new Set(
+	HELIDON_CONFIG_PROPERTIES.map((property) => normalizeConfigKey(property.key).split('.')[0])
+);
+const YAML_KEY_SEGMENT_PATTERN = /[A-Za-z0-9_-]+/;
+
+interface ConfigKeyDiagnosticTarget {
+	key: string;
+	range: vscode.Range;
+}
+
+interface YamlPathEntry {
+	indent: number;
+	key: string;
+}
 
 function propertyMarkdown(property: HelidonConfigProperty): vscode.MarkdownString {
 	const markdown = new vscode.MarkdownString(undefined, true);
@@ -32,6 +52,51 @@ function propertyMarkdown(property: HelidonConfigProperty): vscode.MarkdownStrin
 
 export function findHelidonConfigProperty(key: string): HelidonConfigProperty | undefined {
 	return HELIDON_CONFIG_PROPERTY_MAP.get(key);
+}
+
+function normalizeConfigSegment(segment: string): string {
+	if (/^\d+$/.test(segment)) {
+		return '0';
+	}
+
+	return segment.replace(/-\d+$/u, '-0');
+}
+
+function normalizeConfigKey(key: string): string {
+	return key
+		.split('.')
+		.filter((segment) => segment.length > 0)
+		.map(normalizeConfigSegment)
+		.join('.');
+}
+
+function configKeyPrefixes(key: string): string[] {
+	const segments = normalizeConfigKey(key).split('.');
+	return segments.slice(0, -1).map((_, index) => segments.slice(0, index + 1).join('.'));
+}
+
+function shouldValidateHelidonConfigKey(key: string): boolean {
+	const [root] = normalizeConfigKey(key).split('.');
+	return Boolean(root) && HELIDON_CONFIG_ROOTS.has(root);
+}
+
+function isKnownHelidonConfigKey(key: string): boolean {
+	const normalizedKey = normalizeConfigKey(key);
+	return (
+		NORMALIZED_HELIDON_CONFIG_KEYS.has(normalizedKey) ||
+		NORMALIZED_HELIDON_CONFIG_PREFIXES.has(normalizedKey)
+	);
+}
+
+function unknownHelidonConfigDiagnostic(target: ConfigKeyDiagnosticTarget): vscode.Diagnostic {
+	const diagnostic = new vscode.Diagnostic(
+		target.range,
+		`Unknown Helidon configuration key '${target.key}'.`,
+		vscode.DiagnosticSeverity.Warning
+	);
+	diagnostic.source = 'helidon-vsc';
+	diagnostic.code = 'unknown-config-key';
+	return diagnostic;
 }
 
 function toYamlPathSegments(key: string): string[] {
@@ -56,6 +121,73 @@ function yamlIndent(text: string): number {
 	return match ? match[1].length : 0;
 }
 
+function yamlKeyRange(document: vscode.TextDocument, lineIndex: number, key: string): vscode.Range {
+	const line = document.lineAt(lineIndex).text;
+	const keyStart = line.indexOf(key);
+	return new vscode.Range(lineIndex, keyStart, lineIndex, keyStart + key.length);
+}
+
+function parseYamlKey(trimmedLine: string): { key: string; remainder: string } | undefined {
+	const keyMatch =
+		/^"([^"]+)":\s*(.*)$/.exec(trimmedLine) ||
+		/^'([^']+)':\s*(.*)$/.exec(trimmedLine) ||
+		/^([A-Za-z0-9_-]+):\s*(.*)$/.exec(trimmedLine);
+
+	if (!keyMatch) {
+		return undefined;
+	}
+
+	return { key: keyMatch[1], remainder: keyMatch[2] ?? '' };
+}
+
+function yamlKeyEntries(document: vscode.TextDocument): ConfigKeyDiagnosticTarget[] {
+	const entries: ConfigKeyDiagnosticTarget[] = [];
+	const stack: YamlPathEntry[] = [];
+
+	for (let lineIndex = 0; lineIndex < document.lineCount; lineIndex++) {
+		const line = document.lineAt(lineIndex).text;
+		const trimmed = line.trim();
+		if (trimmed.length === 0 || trimmed.startsWith('#')) {
+			continue;
+		}
+
+		const indent = yamlIndent(line);
+		while (stack.length > 0 && stack[stack.length - 1].indent >= indent) {
+			stack.pop();
+		}
+
+		if (trimmed.startsWith('- ')) {
+			stack.push({ indent, key: '0' });
+			const parsedListKey = parseYamlKey(trimmed.slice(2).trimStart());
+			if (!parsedListKey) {
+				continue;
+			}
+
+			const { key, remainder } = parsedListKey;
+			const path = [...stack.map((entry) => entry.key), key].join('.');
+			entries.push({ key: path, range: yamlKeyRange(document, lineIndex, key) });
+			if (remainder.length === 0 || remainder.startsWith('#')) {
+				stack.push({ indent, key });
+			}
+			continue;
+		}
+
+		const parsedKey = parseYamlKey(trimmed);
+		if (!parsedKey) {
+			continue;
+		}
+
+		const { key, remainder } = parsedKey;
+		const path = [...stack.map((entry) => entry.key), key].join('.');
+		entries.push({ key: path, range: yamlKeyRange(document, lineIndex, key) });
+		if (remainder.length === 0 || remainder.startsWith('#')) {
+			stack.push({ indent, key });
+		}
+	}
+
+	return entries;
+}
+
 function currentYamlPath(document: vscode.TextDocument, position: vscode.Position): string[] {
 	const segments: string[] = [];
 	const stack: Array<{ indent: number; key: string }> = [];
@@ -68,8 +200,8 @@ function currentYamlPath(document: vscode.TextDocument, position: vscode.Positio
 			continue;
 		}
 
-		const keyMatch = /^([A-Za-z0-9_-]+):/.exec(trimmed);
-		if (!keyMatch) {
+		const parsedKey = parseYamlKey(trimmed);
+		if (!parsedKey) {
 			continue;
 		}
 
@@ -78,7 +210,7 @@ function currentYamlPath(document: vscode.TextDocument, position: vscode.Positio
 			stack.pop();
 		}
 
-		stack.push({ indent, key: keyMatch[1] });
+		stack.push({ indent, key: parsedKey.key });
 	}
 
 	for (const item of stack) {
@@ -150,39 +282,19 @@ function yamlCompletionItems(document: vscode.TextDocument, position: vscode.Pos
 }
 
 function hoverForYaml(document: vscode.TextDocument, position: vscode.Position): vscode.Hover | undefined {
-	const line = document.lineAt(position.line).text;
-	const keyRange = document.getWordRangeAtPosition(position, /[A-Za-z0-9_-]+/);
+	const keyRange = document.getWordRangeAtPosition(position, YAML_KEY_SEGMENT_PATTERN);
 	if (!keyRange) {
 		return undefined;
 	}
 
-	const key = document.getText(keyRange);
-	if (!line.trimStart().startsWith(key)) {
+	const yamlEntry = yamlKeyEntries(document).find(
+		(entry) => entry.range.start.line === position.line && entry.range.contains(position)
+	);
+	if (!yamlEntry || yamlEntry.range.start.character !== keyRange.start.character) {
 		return undefined;
 	}
 
-	const stack: Array<{ indent: number; key: string }> = [];
-	for (let lineIndex = 0; lineIndex <= position.line; lineIndex++) {
-		const candidate = document.lineAt(lineIndex).text;
-		const trimmed = candidate.trim();
-		if (trimmed.length === 0 || trimmed.startsWith('#')) {
-			continue;
-		}
-
-		const keyMatch = /^([A-Za-z0-9_-]+):/.exec(trimmed);
-		if (!keyMatch) {
-			continue;
-		}
-
-		const indent = yamlIndent(candidate);
-		while (stack.length > 0 && stack[stack.length - 1].indent >= indent) {
-			stack.pop();
-		}
-		stack.push({ indent, key: keyMatch[1] });
-	}
-
-	const fullKey = stack.map((item) => item.key).join('.');
-	const property = findHelidonConfigProperty(fullKey);
+	const property = findHelidonConfigProperty(normalizeConfigKey(yamlEntry.key));
 	if (!property) {
 		return undefined;
 	}
@@ -197,6 +309,60 @@ export function isHelidonPropertiesDocument(document: vscode.TextDocument): bool
 
 	const fileName = document.fileName.toLowerCase();
 	return fileName.endsWith('application.properties');
+}
+
+export function collectHelidonPropertiesDiagnostics(document: vscode.TextDocument): vscode.Diagnostic[] {
+	if (document.languageId !== 'properties') {
+		return [];
+	}
+
+	const diagnostics: vscode.Diagnostic[] = [];
+
+	for (let lineIndex = 0; lineIndex < document.lineCount; lineIndex++) {
+		const line = document.lineAt(lineIndex).text;
+		const trimmed = line.trim();
+		if (trimmed.length === 0 || trimmed.startsWith('#') || trimmed.startsWith('!')) {
+			continue;
+		}
+
+		const keyMatch = /^\s*([A-Za-z0-9._-]+)\s*[:=]/.exec(line);
+		if (!keyMatch) {
+			continue;
+		}
+
+		const key = keyMatch[1];
+		if (!shouldValidateHelidonConfigKey(key) || isKnownHelidonConfigKey(key)) {
+			continue;
+		}
+
+		const keyStart = line.indexOf(key);
+		const range = new vscode.Range(lineIndex, keyStart, lineIndex, keyStart + key.length);
+		diagnostics.push(unknownHelidonConfigDiagnostic({ key, range }));
+	}
+
+	return diagnostics;
+}
+
+export function collectHelidonYamlDiagnostics(document: vscode.TextDocument): vscode.Diagnostic[] {
+	if (!isYamlLanguage(document.languageId)) {
+		return [];
+	}
+
+	return yamlKeyEntries(document)
+		.filter((entry) => shouldValidateHelidonConfigKey(entry.key) && !isKnownHelidonConfigKey(entry.key))
+		.map(unknownHelidonConfigDiagnostic);
+}
+
+export function collectHelidonDiagnostics(document: vscode.TextDocument): vscode.Diagnostic[] {
+	if (isHelidonPropertiesDocument(document)) {
+		return collectHelidonPropertiesDiagnostics(document);
+	}
+
+	if (isHelidonYamlDocument(document)) {
+		return collectHelidonYamlDiagnostics(document);
+	}
+
+	return [];
 }
 
 export class HelidonPropertiesCompletionProvider implements vscode.CompletionItemProvider {
