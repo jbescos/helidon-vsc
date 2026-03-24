@@ -7,6 +7,7 @@ VS Code extension for Helidon that will grow into framework tooling comparable t
 Current MVP feature:
 
 - Helidon configuration completion in `application.properties`
+- Hover documentation for known Helidon properties in `application.properties`
 
 When editing an `application.properties` file, typing prefixes like `server.` will offer Helidon configuration keys such as:
 
@@ -23,6 +24,22 @@ Completion items include:
 - default value when known
 - short documentation and example value
 
+Hover support includes:
+
+- property description
+- property type
+- default value when known
+- example value
+
+## Metadata source
+
+The current prototype no longer keeps Helidon metadata inline in TypeScript.
+Instead, the extension reads it from:
+
+- `src/metadata/helidon-config-metadata.json`
+
+This is still mocked metadata for now, but it is structured so we can later replace it with generated Helidon metadata or metadata extracted from future Helidon artifacts.
+
 Use the command palette command **Helidon: Trigger Config Completion** to manually open suggestions while testing.
 
 ## Requirements
@@ -37,7 +54,9 @@ No custom settings yet.
 ## Known Issues
 
 - The current metadata catalog is static and intentionally small.
+- The current metadata file is mocked and manually maintained.
 - Completion currently targets `application.properties` only.
+- Hover currently targets known static Helidon keys only.
 - Hover, validation, YAML support, and Java language-server integration are planned next.
 
 ## Release Notes

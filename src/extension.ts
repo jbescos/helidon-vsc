@@ -1,5 +1,9 @@
 import * as vscode from 'vscode';
-import { HelidonPropertiesCompletionProvider, isHelidonPropertiesDocument } from './helidonConfig';
+import {
+	HelidonPropertiesCompletionProvider,
+	HelidonPropertiesHoverProvider,
+	isHelidonPropertiesDocument,
+} from './helidonConfig';
 
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Helidon VS Code extension is active.');
@@ -8,6 +12,11 @@ export function activate(context: vscode.ExtensionContext) {
 		{ language: 'properties', scheme: 'file' },
 		new HelidonPropertiesCompletionProvider(),
 		'.'
+	);
+
+	const hoverProvider = vscode.languages.registerHoverProvider(
+		{ language: 'properties', scheme: 'file' },
+		new HelidonPropertiesHoverProvider()
 	);
 
 	const helloWorldCommand = vscode.commands.registerCommand('helidon-vsc.helloWorld', async () => {
@@ -22,7 +31,7 @@ export function activate(context: vscode.ExtensionContext) {
 		);
 	});
 
-	context.subscriptions.push(completionProvider, helloWorldCommand);
+	context.subscriptions.push(completionProvider, hoverProvider, helloWorldCommand);
 }
 
 export function deactivate() {}
