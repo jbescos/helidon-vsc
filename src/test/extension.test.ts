@@ -17,6 +17,7 @@ suite('Extension Test Suite', () => {
 		const metadata = loadHelidonConfigMetadata();
 		assert.ok(metadata.length > 0);
 		assert.ok(metadata.some((property) => property.key === 'server.port'));
+		assert.ok(metadata.some((property) => property.key === 'server.features.observe.endpoints.health.path'));
 	});
 
 	test('findHelidonConfigProperty finds known Helidon property metadata', () => {

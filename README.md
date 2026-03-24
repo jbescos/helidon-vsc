@@ -53,6 +53,8 @@ Instead, the extension reads it from:
 
 This is still mocked metadata for now, but it is structured so we can later replace it with generated Helidon metadata or metadata extracted from future Helidon artifacts.
 
+The file now follows a more IntelliJ/Helidon-like structured shape based on modules, config types, and options, and the extension flattens that into keys for completion and hover.
+
 Use the command palette command **Helidon: Trigger Config Completion** to manually open suggestions while testing.
 
 ## Requirements
