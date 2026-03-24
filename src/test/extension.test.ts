@@ -3,7 +3,7 @@ import * as assert from 'assert';
 // You can import and use all API from the 'vscode' module
 // as well as import your extension to test it
 import * as vscode from 'vscode';
-import { HELIDON_CONFIG_PROPERTIES, findHelidonConfigProperty, isHelidonPropertiesDocument } from '../helidonConfig';
+import { HELIDON_CONFIG_PROPERTIES, findHelidonConfigProperty, isHelidonPropertiesDocument, isHelidonYamlDocument } from '../helidonConfig';
 import { loadHelidonConfigMetadata } from '../metadata';
 
 suite('Extension Test Suite', () => {
@@ -50,6 +50,16 @@ suite('Extension Test Suite', () => {
 		});
 
 		assert.strictEqual(isHelidonPropertiesDocument(document), false);
+	});
+
+	test('application.yaml is recognized as a Helidon YAML document', async () => {
+		const document = await vscode.workspace.openTextDocument(vscode.Uri.parse('untitled:/application.yaml'));
+		assert.strictEqual(isHelidonYamlDocument(document), true);
+	});
+
+	test('non application YAML file names are ignored', async () => {
+		const document = await vscode.workspace.openTextDocument(vscode.Uri.parse('untitled:/values.yaml'));
+		assert.strictEqual(isHelidonYamlDocument(document), false);
 	});
 });
 

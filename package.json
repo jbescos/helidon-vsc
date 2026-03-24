@@ -12,6 +12,7 @@
   ],
   "activationEvents": [
     "onLanguage:properties",
+    "onLanguage:yaml",
     "onCommand:helidon-vsc.helloWorld"
   ],
   "main": "./dist/extension.js",

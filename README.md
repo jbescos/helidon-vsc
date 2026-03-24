@@ -7,7 +7,9 @@ VS Code extension for Helidon that will grow into framework tooling comparable t
 Current MVP feature:
 
 - Helidon configuration completion in `application.properties`
+- Helidon configuration completion in `application.yaml` / `application.yml`
 - Hover documentation for known Helidon properties in `application.properties`
+- Hover documentation for known Helidon properties in `application.yaml` / `application.yml`
 
 When editing an `application.properties` file, typing prefixes like `server.` will offer Helidon configuration keys such as:
 
@@ -16,6 +18,17 @@ When editing an `application.properties` file, typing prefixes like `server.` wi
 - `server.features.observe.enabled`
 - `logging.level`
 - `security.providers.0.oidc.client-id`
+
+When editing `application.yaml`, the extension offers YAML key suggestions using the same metadata. For example:
+
+```yaml
+server:
+  features:
+    observe:
+      
+```
+
+and hover works on resolved YAML keys such as `port`, `host`, `enabled`, or `path` when they map to known Helidon configuration entries.
 
 Completion items include:
 
@@ -56,6 +69,7 @@ No custom settings yet.
 - The current metadata catalog is static and intentionally small.
 - The current metadata file is mocked and manually maintained.
 - Completion currently targets `application.properties` only.
+- Completion now also targets `application.yaml` and `application.yml`.
 - Hover currently targets known static Helidon keys only.
 - Hover, validation, YAML support, and Java language-server integration are planned next.
 
