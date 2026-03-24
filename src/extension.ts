@@ -6,6 +6,7 @@ import {
 	isHelidonPropertiesDocument,
 	isHelidonYamlDocument,
 } from './helidonConfig';
+import { generateHelidonProject } from './generator';
 
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Helidon VS Code extension is active.');
@@ -43,7 +44,17 @@ export function activate(context: vscode.ExtensionContext) {
 		);
 	});
 
-	context.subscriptions.push(completionProvider, yamlCompletionProvider, hoverProvider, helloWorldCommand);
+	const generateProjectCommand = vscode.commands.registerCommand('helidon-vsc.generateProject', async () => {
+		await generateHelidonProject();
+	});
+
+	context.subscriptions.push(
+		completionProvider,
+		yamlCompletionProvider,
+		hoverProvider,
+		helloWorldCommand,
+		generateProjectCommand,
+	);
 }
 
 export function deactivate() {}

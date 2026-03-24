@@ -10,6 +10,7 @@ Current MVP feature:
 - Helidon configuration completion in `application.yaml` / `application.yml`
 - Hover documentation for known Helidon properties in `application.properties`
 - Hover documentation for known Helidon properties in `application.yaml` / `application.yml`
+- Helidon project generation command using Helidon Maven archetypes
 
 When editing an `application.properties` file, typing prefixes like `server.` will offer Helidon configuration keys such as:
 
@@ -56,6 +57,23 @@ This is still mocked metadata for now, but it is structured so we can later repl
 The file now follows a more IntelliJ/Helidon-like structured shape based on modules, config types, and options, and the extension flattens that into keys for completion and hover.
 
 Use the command palette command **Helidon: Trigger Config Completion** to manually open suggestions while testing.
+
+## Project generation
+
+The extension now includes **Helidon: Generate Project**.
+
+Current MVP behavior:
+
+- prompts for target folder
+- prompts for `groupId`, `artifactId`, package, archetype, and version
+- runs Maven archetype generation with Helidon archetypes from Maven Central
+- opens the generated project in VS Code
+
+Supported archetype choices right now:
+
+- `helidon-quickstart-se`
+- `helidon-quickstart-mp`
+- `helidon-bare-se`
 
 ## Requirements
 
