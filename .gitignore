@@ -24,6 +24,7 @@ pnpm-debug.log*
 # Coverage / test artifacts
 coverage/
 .nyc_output/
+.vscode-test/
 
 # VS Code packaging output
 *.vsix

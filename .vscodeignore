@@ -1,0 +1,9 @@
+src/**
+out/**
+**/*.ts
+esbuild.js
+eslint.config.mjs
+tsconfig.json
+vsc-extension-quickstart.md
+.gitignore
+package-lock.json
