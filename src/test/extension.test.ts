@@ -244,6 +244,52 @@ suite('Extension Test Suite', () => {
 		}
 	});
 
+	test('properties diagnostics accept bracketed indexed keys that normalize to Helidon metadata', async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'helidon-vsc-properties-indexed-'));
+		try {
+			const filePath = path.join(tempRoot, 'microprofile-config.properties');
+			await fs.writeFile(filePath, 'logging.loggers[0].name=demo', 'utf8');
+			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+
+			seedTestMetadata();
+			const diagnostics = collectHelidonPropertiesDiagnostics(document);
+			assert.strictEqual(diagnostics.length, 0);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test('properties diagnostics report malformed indexed key syntax', async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'helidon-vsc-properties-index-errors-'));
+		try {
+			const filePath = path.join(tempRoot, 'microprofile-config.properties');
+			await fs.writeFile(
+				filePath,
+				[
+					'logging.loggers[0.name=demo',
+					'logging.loggers[].name=demo',
+					'logging.loggers[abc].name=demo',
+				].join('\n'),
+				'utf8'
+			);
+			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+
+			seedTestMetadata();
+			const diagnostics = collectHelidonPropertiesDiagnostics(document);
+			assert.strictEqual(diagnostics.length, 3);
+			assert.deepStrictEqual(
+				diagnostics.map((diagnostic) => diagnostic.message),
+				[
+					"Indexed Helidon configuration key is missing a closing ']'.",
+					'Indexed Helidon configuration key is missing an index value.',
+					'Indexed Helidon configuration key index must be an integer.',
+				]
+			);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
 	test('yaml diagnostics warn for unknown keys under known Helidon roots', async () => {
 		const document = await vscode.workspace.openTextDocument({
 			language: 'yaml',
@@ -269,6 +315,38 @@ suite('Extension Test Suite', () => {
 				'  loggers:',
 				'    - name: demo',
 				'      level: INFO',
+			].join('\n'),
+		});
+
+		seedTestMetadata();
+		const diagnostics = collectHelidonYamlDiagnostics(document);
+		assert.strictEqual(diagnostics.length, 0);
+	});
+
+	test('yaml diagnostics report duplicate keys in the same mapping', async () => {
+		const document = await vscode.workspace.openTextDocument({
+			language: 'yaml',
+			content: [
+				'server:',
+				'  port: 8080',
+				'  port: 8081',
+			].join('\n'),
+		});
+
+		seedTestMetadata();
+		const diagnostics = collectHelidonYamlDiagnostics(document);
+		assert.strictEqual(diagnostics.length, 1);
+		assert.strictEqual(diagnostics[0].message, "Duplicate YAML key 'port'.");
+	});
+
+	test('yaml diagnostics do not report duplicate keys across separate list items', async () => {
+		const document = await vscode.workspace.openTextDocument({
+			language: 'yaml',
+			content: [
+				'logging:',
+				'  loggers:',
+				'    - name: demo',
+				'    - name: other',
 			].join('\n'),
 		});
 

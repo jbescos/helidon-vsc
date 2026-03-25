@@ -12,6 +12,8 @@ Current MVP feature:
 - Hover documentation for known Helidon properties in `application.yaml` / `application.yml`
 - Conservative diagnostics for unknown Helidon configuration keys in `application.properties` / `microprofile-config.properties`
 - Conservative diagnostics for unknown Helidon configuration keys in `application.yaml` / `application.yml`
+- Indexed-key syntax diagnostics in `application.properties` / `microprofile-config.properties`
+- Duplicate YAML key diagnostics in `application.yaml` / `application.yml`
 - Helidon project generation command using Helidon Maven archetypes
 
 When editing an `application.properties` or `microprofile-config.properties` file, typing prefixes like `server.` will offer Helidon configuration keys such as:
@@ -47,7 +49,13 @@ Hover support includes:
 - default value when known
 - example value
 
-Diagnostics currently warn only for unknown keys under known Helidon config roots such as `server`, `logging`, or `security`, which keeps custom application properties out of the warning stream.
+Diagnostics currently cover:
+
+- unknown keys under known Helidon config roots such as `server`, `logging`, or `security`, which keeps custom application properties out of the warning stream
+- malformed indexed properties keys such as missing `]`, empty `[]`, or non-integer indexes
+- duplicate YAML keys within the same mapping
+
+Diagnostics currently do not warn for duplicate keys in Java `.properties` files. Those files commonly use last-one-wins semantics, so duplicate-key inspection there is still undecided.
 
 ## Metadata source
 
@@ -88,6 +96,7 @@ No custom settings yet.
 - Completion and hover support are currently scoped to Helidon-style `application.properties`, `microprofile-config.properties`, `application.yaml`, and `application.yml` files.
 - Completion, hover, and diagnostics depend on Java classpath metadata being available from `redhat.java`.
 - If the Java workspace is still loading, Helidon metadata may appear a moment later after classpath resolution finishes.
+- Diagnostics are intentionally conservative and do not yet include duplicate-key warnings for `.properties` files, value/reference validation, or code actions.
 
 ## Release Notes
 

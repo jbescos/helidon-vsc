@@ -185,6 +185,20 @@ Testing against `/home/jbescos/workspace/demo-helidon` surfaced important runtim
 - a `Helidon` output channel was added for runtime debugging
 - a debug command `Helidon: Reload Extension` was added to force a clean window reload during testing
 
+### 10. First richer inspections pass
+Implemented a first non-trivial diagnostics/inspection step:
+- properties indexed-key syntax validation
+  - missing closing bracket detection
+  - missing index value detection
+  - non-integer index detection
+- properties key normalization now accepts bracket notation such as `logging.loggers[0].name`
+- YAML duplicate key detection within the same mapping
+- YAML duplicate detection intentionally does not flag the same key name repeated across different list items
+
+Important scope note:
+- duplicate-key diagnostics for Java `.properties` files are still not implemented
+- this is currently intentional because `.properties` files often allow repeated keys with last-one-wins semantics, so product behavior should be decided before adding that warning
+
 ---
 
 ## Commits created so far
@@ -311,14 +325,16 @@ Current VS Code parity status against the JetBrains plugin:
   - config completion for YAML
   - hover/documentation
   - conservative unknown-key diagnostics
+  - indexed properties-key syntax diagnostics
+  - duplicate YAML key diagnostics
   - project generation command
   - metadata loading from `META-INF/helidon/config-metadata.json`
 
 - still missing:
-  - richer inspections beyond unknown-key warnings
   - quick fixes / code actions
-  - duplicate YAML key handling
+  - unresolved map/path validation
   - value/reference validation
+  - duplicate `.properties` key handling (if desired)
   - Java-side config key references/navigation
   - endpoint discovery/display/navigation
   - endpoint inlay/code-lens-style affordances
@@ -350,6 +366,8 @@ So for the next conversation, do **not** center the work around a deeper JDT LS 
 - [x] `application.yaml` / `application.yml` completion
 - [x] `application.yaml` / `application.yml` hover
 - [x] conservative diagnostics for unknown Helidon keys in supported properties/YAML files
+- [x] indexed properties-key syntax diagnostics (`[]`, missing `]`, non-integer index)
+- [x] duplicate YAML key diagnostics
 - [x] structured metadata parser inspired by IntelliJ plugin
 - [x] Java classpath metadata loading via `redhat.java`
 - [x] parser compatibility with real Helidon 4 metadata
@@ -361,8 +379,10 @@ So for the next conversation, do **not** center the work around a deeper JDT LS 
 - [x] Helidon project generation command using archetypes
 
 ### Not implemented yet
-- [ ] richer inspections beyond unknown-key diagnostics
 - [ ] quick fixes / code actions
+- [ ] unresolved map/path validation where metadata is strong enough
+- [ ] value-level validation where hints/metadata allow it
+- [ ] duplicate `.properties` key diagnostics, if product direction wants them
 - [ ] endpoint discovery / display
 - [ ] Java-side Helidon references / navigation
 - [ ] value/reference intelligence for config values and placeholders
@@ -375,15 +395,14 @@ So for the next conversation, do **not** center the work around a deeper JDT LS 
 
 ## Recommended next tasks
 Suggested next priorities for the new conversation:
-1. **Richer inspections** for properties and YAML:
-   - indexed key syntax validation
-   - duplicate YAML key detection
-   - unresolved map/path validation where metadata is strong enough
-   - value-level validation where hints/metadata allow it
-2. **Quick fixes / code actions** where safe:
+1. **Quick fixes / code actions** where safe:
    - duplicate YAML key removal
    - typo correction for unknown keys
    - malformed indexed-key fixes
+2. **Remaining richer inspections** for properties and YAML:
+   - unresolved map/path validation where metadata is strong enough
+   - value-level validation where hints/metadata allow it
+   - decide whether duplicate `.properties` keys should warn at all
 3. **Endpoint discovery / display**:
    - discover Helidon routes/endpoints from Java
    - expose them in a VS Code tree view, panel, or code lens form
@@ -416,8 +435,10 @@ If inspections are tackled, be conservative because missing classpath metadata c
 3. In Extension Development Host, open `/home/jbescos/workspace/demo-helidon` or `/home/jbescos/workspace/helidon-vsc-example`
 4. Test:
    - `application.properties`
+   - malformed indexed properties keys such as `logging.loggers[].name=value`
    - `src/main/resources/META-INF/microprofile-config.properties` in generated MP projects
    - `application.yaml`
+   - duplicate YAML keys in the same mapping
    - output panel → `Helidon`
    - command palette → `Helidon: Generate Project`
    - command palette → `Helidon: Reload Extension` (debug only)
@@ -438,4 +459,4 @@ If inspections are tackled, be conservative because missing classpath metadata c
 ---
 
 ## Suggested first action in the next conversation
-Read this file first, then continue with one concrete next milestone (probably diagnostics/inspections or endpoint support), while keeping Java-language-server integration deferred until later.
+Read this file first, then continue with one concrete next milestone (probably code actions/quick fixes or endpoint support), while keeping Java-language-server integration deferred until later.
