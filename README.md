@@ -14,6 +14,9 @@ Current MVP feature:
 - Conservative diagnostics for unknown Helidon configuration keys in `application.yaml` / `application.yml`
 - Indexed-key syntax diagnostics in `application.properties` / `microprofile-config.properties`
 - Duplicate YAML key diagnostics in `application.yaml` / `application.yml`
+- Quick fixes for unknown-key typos when a strong Helidon metadata match exists
+- Quick fixes for malformed indexed properties keys
+- Quick fixes to remove duplicate YAML keys
 - Helidon project generation command using Helidon Maven archetypes
 
 When editing an `application.properties` or `microprofile-config.properties` file, typing prefixes like `server.` will offer Helidon configuration keys such as:
@@ -54,6 +57,12 @@ Diagnostics currently cover:
 - unknown keys under known Helidon config roots such as `server`, `logging`, or `security`, which keeps custom application properties out of the warning stream
 - malformed indexed properties keys such as missing `]`, empty `[]`, or non-integer indexes
 - duplicate YAML keys within the same mapping
+
+Quick fixes currently cover:
+
+- typo correction for unknown keys when the metadata match is strong enough
+- malformed indexed properties keys by inserting `]` or replacing invalid brackets with `[0]`
+- duplicate YAML key removal
 
 Diagnostics currently do not warn for duplicate keys in Java `.properties` files. Those files commonly use last-one-wins semantics, so duplicate-key inspection there is still undecided.
 
@@ -96,7 +105,8 @@ No custom settings yet.
 - Completion and hover support are currently scoped to Helidon-style `application.properties`, `microprofile-config.properties`, `application.yaml`, and `application.yml` files.
 - Completion, hover, and diagnostics depend on Java classpath metadata being available from `redhat.java`.
 - If the Java workspace is still loading, Helidon metadata may appear a moment later after classpath resolution finishes.
-- Diagnostics are intentionally conservative and do not yet include duplicate-key warnings for `.properties` files, value/reference validation, or code actions.
+- Diagnostics are intentionally conservative and do not yet include duplicate-key warnings for `.properties` files or value/reference validation.
+- Quick fixes are currently limited to typo corrections, malformed indexed keys, and duplicate YAML key removal.
 
 ## Release Notes
 

@@ -10,6 +10,7 @@ import * as vscode from 'vscode';
 import {
 	collectHelidonPropertiesDiagnostics,
 	collectHelidonYamlDiagnostics,
+	HelidonConfigCodeActionProvider,
 	findHelidonConfigProperty,
 	isHelidonPropertiesDocument,
 	isHelidonYamlDocument,
@@ -153,6 +154,13 @@ const TEST_PROPERTIES: HelidonConfigProperty[] = [
 
 function seedTestMetadata(): void {
 	replaceHelidonConfigProperties(TEST_PROPERTIES);
+}
+
+function firstWorkspaceEdit(action: vscode.CodeAction): vscode.TextEdit {
+	const entries = action.edit?.entries() ?? [];
+	assert.strictEqual(entries.length, 1);
+	assert.strictEqual(entries[0][1].length, 1);
+	return entries[0][1][0];
 }
 
 suite('Extension Test Suite', () => {
@@ -371,6 +379,137 @@ suite('Extension Test Suite', () => {
 		seedTestMetadata();
 		const diagnostics = collectHelidonYamlDiagnostics(document);
 		assert.strictEqual(diagnostics.length, 0);
+	});
+
+	test('properties quick fix suggests typo correction for unknown keys', async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'helidon-vsc-properties-quickfix-'));
+		try {
+			const filePath = path.join(tempRoot, 'microprofile-config.properties');
+			await fs.writeFile(filePath, 'server.prt=8080', 'utf8');
+			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+
+			seedTestMetadata();
+			const diagnostics = collectHelidonPropertiesDiagnostics(document);
+			const provider = new HelidonConfigCodeActionProvider();
+			const actions =
+				(await Promise.resolve(
+					provider.provideCodeActions(document, diagnostics[0].range, {
+						diagnostics,
+						only: vscode.CodeActionKind.QuickFix,
+						triggerKind: vscode.CodeActionTriggerKind.Invoke,
+					})
+				)) ?? [];
+
+			const typoFix = actions.find((action) => action.title === "Change to 'server.port'");
+			assert.ok(typoFix);
+			const edit = firstWorkspaceEdit(typoFix!);
+			assert.strictEqual(edit.newText, 'server.port');
+			assert.strictEqual(edit.range.start.line, 0);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test('properties quick fix replaces malformed indexed key segments', async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'helidon-vsc-indexed-quickfix-'));
+		try {
+			const filePath = path.join(tempRoot, 'microprofile-config.properties');
+			await fs.writeFile(filePath, 'logging.loggers[].name=demo', 'utf8');
+			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+
+			seedTestMetadata();
+			const diagnostics = collectHelidonPropertiesDiagnostics(document);
+			const provider = new HelidonConfigCodeActionProvider();
+			const actions =
+				(await Promise.resolve(
+					provider.provideCodeActions(document, diagnostics[0].range, {
+						diagnostics,
+						only: vscode.CodeActionKind.QuickFix,
+						triggerKind: vscode.CodeActionTriggerKind.Invoke,
+					})
+				)) ?? [];
+
+			const indexedFix = actions.find((action) => action.title === "Replace with '[0]'");
+			assert.ok(indexedFix);
+			const edit = firstWorkspaceEdit(indexedFix!);
+			assert.strictEqual(edit.newText, '[0]');
+			assert.strictEqual(edit.range.start.character, 'logging.loggers'.length);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test('yaml quick fix removes duplicate YAML key blocks', async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'helidon-vsc-yaml-quickfix-'));
+		try {
+			const filePath = path.join(tempRoot, 'application.yaml');
+			await fs.writeFile(
+				filePath,
+				[
+					'server:',
+					'  port: 8080',
+					'  port: 8081',
+				].join('\n'),
+				'utf8'
+			);
+			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+
+			seedTestMetadata();
+			const diagnostics = collectHelidonYamlDiagnostics(document);
+			const provider = new HelidonConfigCodeActionProvider();
+			const actions =
+				(await Promise.resolve(
+					provider.provideCodeActions(document, diagnostics[0].range, {
+						diagnostics,
+						only: vscode.CodeActionKind.QuickFix,
+						triggerKind: vscode.CodeActionTriggerKind.Invoke,
+					})
+				)) ?? [];
+
+			const duplicateFix = actions.find((action) => action.title === 'Remove duplicate YAML key');
+			assert.ok(duplicateFix);
+			const edit = firstWorkspaceEdit(duplicateFix!);
+			assert.strictEqual(edit.newText, '');
+			assert.strictEqual(edit.range.start.line, 2);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test('yaml quick fix suggests typo correction for unknown keys', async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'helidon-vsc-yaml-typo-quickfix-'));
+		try {
+			const filePath = path.join(tempRoot, 'application.yaml');
+			await fs.writeFile(
+				filePath,
+				[
+					'server:',
+					'  prt: 8080',
+				].join('\n'),
+				'utf8'
+			);
+			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+
+			seedTestMetadata();
+			const diagnostics = collectHelidonYamlDiagnostics(document);
+			const provider = new HelidonConfigCodeActionProvider();
+			const actions =
+				(await Promise.resolve(
+					provider.provideCodeActions(document, diagnostics[0].range, {
+						diagnostics,
+						only: vscode.CodeActionKind.QuickFix,
+						triggerKind: vscode.CodeActionTriggerKind.Invoke,
+					})
+				)) ?? [];
+
+			const typoFix = actions.find((action) => action.title === "Change to 'port'");
+			assert.ok(typoFix);
+			const edit = firstWorkspaceEdit(typoFix!);
+			assert.strictEqual(edit.newText, 'port');
+			assert.strictEqual(edit.range.start.line, 1);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
 	});
 
 	test('classpath metadata loader reads Helidon metadata from directories and jars', async () => {

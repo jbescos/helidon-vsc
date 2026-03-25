@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import {
 	collectHelidonDiagnostics,
+	HelidonConfigCodeActionProvider,
 	HelidonPropertiesCompletionProvider,
 	HelidonPropertiesHoverProvider,
 	HelidonYamlCompletionProvider,
@@ -53,6 +54,21 @@ export function activate(context: vscode.ExtensionContext) {
 			{ language: 'yaml', scheme: 'untitled' },
 		],
 		new HelidonPropertiesHoverProvider()
+	);
+
+	const codeActionProvider = vscode.languages.registerCodeActionsProvider(
+		[
+			{ scheme: 'file', pattern: '**/application.properties' },
+			{ scheme: 'file', pattern: '**/microprofile-config.properties' },
+			{ scheme: 'untitled', pattern: '**/application.properties' },
+			{ scheme: 'untitled', pattern: '**/microprofile-config.properties' },
+			{ language: 'yaml', scheme: 'file' },
+			{ language: 'yaml', scheme: 'untitled' },
+		],
+		new HelidonConfigCodeActionProvider(),
+		{
+			providedCodeActionKinds: HelidonConfigCodeActionProvider.providedCodeActionKinds,
+		}
 	);
 
 	const generateProjectCommand = vscode.commands.registerCommand('helidon-vsc.generateProject', async () => {
@@ -206,6 +222,7 @@ export function activate(context: vscode.ExtensionContext) {
 		completionProvider,
 		yamlCompletionProvider,
 		hoverProvider,
+		codeActionProvider,
 		generateProjectCommand,
 		reloadExtensionCommand,
 		openDocumentDiagnostics,

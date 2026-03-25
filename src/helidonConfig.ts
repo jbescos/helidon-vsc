@@ -7,6 +7,7 @@ let helidonConfigPropertyMap = new Map<string, HelidonConfigProperty>();
 let normalizedHelidonConfigKeys = new Set<string>();
 let normalizedHelidonConfigPrefixes = new Set<string>();
 let helidonConfigRoots = new Set<string>();
+let normalizedHelidonConfigKeyMap = new Map<string, string[]>();
 const YAML_KEY_SEGMENT_PATTERN = /[A-Za-z0-9_-]+/;
 
 interface ConfigKeyDiagnosticTarget {
@@ -56,6 +57,13 @@ function rebuildHelidonConfigIndexes(properties: readonly HelidonConfigProperty[
 	normalizedHelidonConfigKeys = new Set(properties.map((property) => normalizeConfigKey(property.key)));
 	normalizedHelidonConfigPrefixes = new Set(properties.flatMap((property) => configKeyPrefixes(property.key)));
 	helidonConfigRoots = new Set(properties.map((property) => normalizeConfigKey(property.key).split('.')[0]));
+	normalizedHelidonConfigKeyMap = new Map<string, string[]>();
+	for (const property of properties) {
+		const normalizedKey = normalizeConfigKey(property.key);
+		const keys = normalizedHelidonConfigKeyMap.get(normalizedKey) ?? [];
+		keys.push(property.key);
+		normalizedHelidonConfigKeyMap.set(normalizedKey, keys);
+	}
 }
 
 export function replaceHelidonConfigProperties(properties: readonly HelidonConfigProperty[]): void {
@@ -154,6 +162,95 @@ function duplicateYamlKeyDiagnostic(target: ConfigKeyDiagnosticTarget): vscode.D
 	return diagnostic;
 }
 
+function levenshteinDistance(left: string, right: string): number {
+	if (left === right) {
+		return 0;
+	}
+
+	if (left.length === 0) {
+		return right.length;
+	}
+
+	if (right.length === 0) {
+		return left.length;
+	}
+
+	const previousRow = Array.from({ length: right.length + 1 }, (_, index) => index);
+	const currentRow = new Array<number>(right.length + 1);
+
+	for (let leftIndex = 0; leftIndex < left.length; leftIndex++) {
+		currentRow[0] = leftIndex + 1;
+		for (let rightIndex = 0; rightIndex < right.length; rightIndex++) {
+			const substitutionCost = left[leftIndex] === right[rightIndex] ? 0 : 1;
+			currentRow[rightIndex + 1] = Math.min(
+				currentRow[rightIndex] + 1,
+				previousRow[rightIndex + 1] + 1,
+				previousRow[rightIndex] + substitutionCost
+			);
+		}
+
+		for (let index = 0; index < currentRow.length; index++) {
+			previousRow[index] = currentRow[index];
+		}
+	}
+
+	return previousRow[right.length];
+}
+
+function similarityThreshold(key: string): number {
+	if (key.length <= 4) {
+		return 1;
+	}
+
+	if (key.length <= 12) {
+		return 2;
+	}
+
+	return 3;
+}
+
+function preferredKeyForNormalizedKey(normalizedKey: string): string | undefined {
+	const keys = normalizedHelidonConfigKeyMap.get(normalizedKey);
+	if (!keys || keys.length === 0) {
+		return undefined;
+	}
+
+	return keys[0];
+}
+
+function suggestHelidonConfigKey(key: string): string | undefined {
+	const normalizedKey = normalizeConfigKey(key);
+	const root = normalizedKey.split('.')[0];
+	if (!root || !helidonConfigRoots.has(root)) {
+		return undefined;
+	}
+
+	let bestMatch: { key: string; score: number } | undefined;
+	for (const [candidateNormalizedKey, candidateKeys] of normalizedHelidonConfigKeyMap.entries()) {
+		if (candidateNormalizedKey.split('.')[0] !== root) {
+			continue;
+		}
+
+		const distance = levenshteinDistance(normalizedKey, candidateNormalizedKey);
+		const segmentDelta = Math.abs(normalizedKey.split('.').length - candidateNormalizedKey.split('.').length);
+		const score = distance + segmentDelta;
+		if (
+			bestMatch &&
+			(score > bestMatch.score || (score === bestMatch.score && candidateNormalizedKey.length >= bestMatch.key.length))
+		) {
+			continue;
+		}
+
+		bestMatch = { key: candidateKeys[0], score };
+	}
+
+	if (!bestMatch || bestMatch.score > similarityThreshold(normalizedKey)) {
+		return undefined;
+	}
+
+	return bestMatch.key;
+}
+
 function analyzeIndexedConfigKey(key: string): IndexedKeyAnalysis {
 	const normalizedSegments: string[] = [];
 	let currentSegment = '';
@@ -229,6 +326,15 @@ function analyzeIndexedConfigKey(key: string): IndexedKeyAnalysis {
 	return {
 		normalizedKey: normalizedSegments.join('.'),
 	};
+}
+
+function unknownKeyFromDiagnostic(diagnostic: vscode.Diagnostic): string | undefined {
+	if (typeof diagnostic.code !== 'string' || diagnostic.code !== 'unknown-config-key') {
+		return undefined;
+	}
+
+	const match = /^Unknown Helidon configuration key '(.+)'\.$/u.exec(diagnostic.message);
+	return match?.[1];
 }
 
 function toYamlPathSegments(key: string): string[] {
@@ -355,6 +461,132 @@ function collectDuplicateYamlKeyDiagnostics(document: vscode.TextDocument): vsco
 	}
 
 	return diagnostics;
+}
+
+function yamlBlockRemovalRange(document: vscode.TextDocument, lineIndex: number): vscode.Range {
+	const start = new vscode.Position(lineIndex, 0);
+	const currentIndent = yamlIndent(document.lineAt(lineIndex).text);
+	let endLineIndex = lineIndex + 1;
+
+	while (endLineIndex < document.lineCount) {
+		const line = document.lineAt(endLineIndex).text;
+		const trimmed = line.trim();
+		if (trimmed.length === 0) {
+			endLineIndex += 1;
+			continue;
+		}
+
+		if (yamlIndent(line) > currentIndent) {
+			endLineIndex += 1;
+			continue;
+		}
+
+		break;
+	}
+
+	if (endLineIndex < document.lineCount) {
+		return new vscode.Range(start, new vscode.Position(endLineIndex, 0));
+	}
+
+	return new vscode.Range(start, document.lineAt(document.lineCount - 1).rangeIncludingLineBreak.end);
+}
+
+function createCodeAction(
+	title: string,
+	kind: vscode.CodeActionKind,
+	document: vscode.TextDocument,
+	edits: ReadonlyArray<{ range: vscode.Range; newText: string }>,
+	diagnostic: vscode.Diagnostic,
+): vscode.CodeAction {
+	const action = new vscode.CodeAction(title, kind);
+	action.diagnostics = [diagnostic];
+	action.isPreferred = true;
+	action.edit = new vscode.WorkspaceEdit();
+	for (const edit of edits) {
+		action.edit.replace(document.uri, edit.range, edit.newText);
+	}
+	return action;
+}
+
+function codeActionsForIndexedDiagnostic(
+	document: vscode.TextDocument,
+	diagnostic: vscode.Diagnostic,
+): vscode.CodeAction[] {
+	if (typeof diagnostic.code !== 'string') {
+		return [];
+	}
+
+	switch (diagnostic.code) {
+		case 'indexed-key-missing-closing-bracket':
+			return [
+				createCodeAction(
+					"Insert closing ']'",
+					vscode.CodeActionKind.QuickFix,
+					document,
+					[{ range: new vscode.Range(diagnostic.range.end, diagnostic.range.end), newText: ']' }],
+					diagnostic
+				),
+			];
+		case 'indexed-key-missing-value':
+		case 'indexed-key-non-integer':
+			return [
+				createCodeAction(
+					"Replace with '[0]'",
+					vscode.CodeActionKind.QuickFix,
+					document,
+					[{ range: diagnostic.range, newText: '[0]' }],
+					diagnostic
+				),
+			];
+		default:
+			return [];
+	}
+}
+
+function codeActionsForDuplicateYamlKey(
+	document: vscode.TextDocument,
+	diagnostic: vscode.Diagnostic,
+): vscode.CodeAction[] {
+	if (typeof diagnostic.code !== 'string' || diagnostic.code !== 'duplicate-yaml-key') {
+		return [];
+	}
+
+	return [
+		createCodeAction(
+			'Remove duplicate YAML key',
+			vscode.CodeActionKind.QuickFix,
+			document,
+			[{ range: yamlBlockRemovalRange(document, diagnostic.range.start.line), newText: '' }],
+			diagnostic
+		),
+	];
+}
+
+function codeActionsForUnknownKey(document: vscode.TextDocument, diagnostic: vscode.Diagnostic): vscode.CodeAction[] {
+	const unknownKey = unknownKeyFromDiagnostic(diagnostic);
+	if (!unknownKey) {
+		return [];
+	}
+
+	const suggestion = suggestHelidonConfigKey(unknownKey);
+	if (!suggestion || suggestion === unknownKey) {
+		return [];
+	}
+
+	const replacement =
+		isHelidonYamlDocument(document) && suggestion.includes('.')
+			? suggestion.split('.').at(-1) ?? suggestion
+			: suggestion;
+
+	return [
+		createCodeAction(
+			`Change to '${replacement}'`,
+			vscode.CodeActionKind.QuickFix,
+			document,
+			[{ range: diagnostic.range, newText: replacement }],
+			diagnostic
+		),
+	];
 }
 
 function currentYamlPath(document: vscode.TextDocument, position: vscode.Position): string[] {
@@ -545,6 +777,26 @@ export function collectHelidonDiagnostics(document: vscode.TextDocument): vscode
 	}
 
 	return [];
+}
+
+export class HelidonConfigCodeActionProvider implements vscode.CodeActionProvider {
+	static readonly providedCodeActionKinds = [vscode.CodeActionKind.QuickFix];
+
+	provideCodeActions(
+		document: vscode.TextDocument,
+		_range: vscode.Range | vscode.Selection,
+		context: vscode.CodeActionContext,
+	): vscode.ProviderResult<vscode.CodeAction[]> {
+		if (!isHelidonPropertiesDocument(document) && !isHelidonYamlDocument(document)) {
+			return undefined;
+		}
+
+		return context.diagnostics.flatMap((diagnostic) => [
+			...codeActionsForIndexedDiagnostic(document, diagnostic),
+			...codeActionsForDuplicateYamlKey(document, diagnostic),
+			...codeActionsForUnknownKey(document, diagnostic),
+		]);
+	}
 }
 
 export class HelidonPropertiesCompletionProvider implements vscode.CompletionItemProvider {
