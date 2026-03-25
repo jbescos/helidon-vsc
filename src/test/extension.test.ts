@@ -9,6 +9,11 @@ import JSZip = require('jszip');
 import * as vscode from 'vscode';
 import { parseJavaHelidonRoutingEndpoints, parseJavaJaxRsEndpoints } from '../endpoints';
 import {
+	buildHelidonPropertiesDocumentSelectors,
+	isMicroProfileManagedHelidonPropertiesFile,
+	shouldUseCustomHelidonPropertiesFeatures,
+} from '../extension';
+import {
 	collectHelidonPropertiesDiagnostics,
 	collectHelidonYamlDiagnostics,
 	HelidonConfigCodeActionProvider,
@@ -399,6 +404,39 @@ suite('Extension Test Suite', () => {
 		assert.deepStrictEqual(references.map((reference) => reference.key), ['server.port', 'metrics.enabled']);
 	});
 
+	test('Java config parser ignores unrelated get calls even when Helidon Config is in scope', () => {
+		const references = parseJavaConfigReferences(`
+			import io.helidon.config.Config;
+			import java.util.Map;
+
+			class Demo {
+			    void load(Config config, Map<String, String> values) {
+			        values.get("not.a.config");
+			        config.get("server.port").asInt();
+			    }
+			}
+		`);
+
+		assert.deepStrictEqual(references.map((reference) => reference.key), ['server.port']);
+	});
+
+	test('Java config parser recognizes Helidon Config field and static-chain receivers', () => {
+		const references = parseJavaConfigReferences(`
+			import io.helidon.config.Config;
+
+			class Demo {
+			    private Config field;
+
+			    void load() {
+			        this.field.get("server.port").asInt();
+			        Config.global().get("metrics.enabled").asBoolean();
+			    }
+			}
+		`);
+
+		assert.deepStrictEqual(references.map((reference) => reference.key), ['server.port', 'metrics.enabled']);
+	});
+
 	test('findHelidonConfigProperty finds known Helidon property metadata', () => {
 		seedTestMetadata();
 		const property = findHelidonConfigProperty('server.port');
@@ -454,6 +492,47 @@ suite('Extension Test Suite', () => {
 			languageId: 'plaintext',
 		} as vscode.TextDocument;
 		assert.strictEqual(isHelidonPropertiesDocument(document), false);
+	});
+
+	test('MicroProfile-managed Helidon properties file detection is limited to exact standard names', () => {
+		assert.strictEqual(isMicroProfileManagedHelidonPropertiesFile('/tmp/application.properties'), true);
+		assert.strictEqual(isMicroProfileManagedHelidonPropertiesFile('/tmp/microprofile-config.properties'), true);
+		assert.strictEqual(isMicroProfileManagedHelidonPropertiesFile('/tmp/microprofile-config-dev.properties'), false);
+		assert.strictEqual(isMicroProfileManagedHelidonPropertiesFile('/tmp/application-dev.properties'), false);
+	});
+
+	test('custom Helidon properties features back off exact standard names when Tools for MicroProfile is present', () => {
+		assert.strictEqual(
+			shouldUseCustomHelidonPropertiesFeatures({ fileName: '/tmp/application.properties' }, true),
+			false
+		);
+		assert.strictEqual(
+			shouldUseCustomHelidonPropertiesFeatures({ fileName: '/tmp/microprofile-config.properties' }, true),
+			false
+		);
+		assert.strictEqual(
+			shouldUseCustomHelidonPropertiesFeatures({ fileName: '/tmp/microprofile-config-dev.properties' }, true),
+			true
+		);
+		assert.strictEqual(
+			shouldUseCustomHelidonPropertiesFeatures({ fileName: '/tmp/application.properties' }, false),
+			true
+		);
+	});
+
+	test('properties selector set narrows to Helidon-only names when Tools for MicroProfile is present', () => {
+		assert.deepStrictEqual(buildHelidonPropertiesDocumentSelectors(true), [
+			{ scheme: 'file', pattern: '**/microprofile-config-*.properties' },
+			{ scheme: 'untitled', pattern: '**/microprofile-config-*.properties' },
+		]);
+		assert.deepStrictEqual(buildHelidonPropertiesDocumentSelectors(false), [
+			{ scheme: 'file', pattern: '**/application.properties' },
+			{ scheme: 'file', pattern: '**/microprofile-config.properties' },
+			{ scheme: 'file', pattern: '**/microprofile-config-*.properties' },
+			{ scheme: 'untitled', pattern: '**/application.properties' },
+			{ scheme: 'untitled', pattern: '**/microprofile-config.properties' },
+			{ scheme: 'untitled', pattern: '**/microprofile-config-*.properties' },
+		]);
 	});
 
 	test('non application.properties file names are ignored', async () => {
@@ -1463,5 +1542,41 @@ suite('Extension Test Suite', () => {
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
+	});
+
+	test('package manifest composes with Tools for MicroProfile for application.properties', async () => {
+		const packageJsonPath = path.resolve(__dirname, '..', '..', 'package.json');
+		const manifest = JSON.parse(await fs.readFile(packageJsonPath, 'utf8')) as {
+			extensionPack?: string[];
+			contributes?: {
+				microprofile?: {
+					documentSelector?: Array<Record<string, string>>;
+				};
+			};
+		};
+
+		assert.ok(manifest.extensionPack?.includes('redhat.vscode-microprofile'));
+		assert.deepStrictEqual(manifest.contributes?.microprofile?.documentSelector, [
+			{
+				scheme: 'file',
+				language: 'properties',
+				pattern: '**/application.properties',
+			},
+			{
+				scheme: 'file',
+				language: 'java-properties',
+				pattern: '**/application.properties',
+			},
+			{
+				scheme: 'untitled',
+				language: 'properties',
+				pattern: '**/application.properties',
+			},
+			{
+				scheme: 'untitled',
+				language: 'java-properties',
+				pattern: '**/application.properties',
+			},
+		]);
 	});
 });

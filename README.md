@@ -15,6 +15,7 @@ This extension currently covers:
 
 - Visual Studio Code `1.110.0` or newer
 - `Language Support for Java(TM) by Red Hat` (`redhat.java`)
+- `Tools for MicroProfile` (`redhat.vscode-microprofile`) is installed alongside this extension through the extension pack manifest so VS Code can reuse LSP4MP where it applies
 - `Extension Pack for Java` is recommended if you want run/debug support
 - Open the Helidon project as a VS Code workspace folder so the Java extension can resolve classpaths
 - Optional: `helidon` on `PATH` for the Helidon CLI wizard
@@ -23,6 +24,8 @@ This extension currently covers:
 ## Features
 
 ### 1. Helidon `.properties` support
+
+When `Tools for MicroProfile` is present, `helidon-vsc` intentionally backs off exact `application.properties` and exact `microprofile-config.properties` so those files can be served by the deeper MicroProfile language support. `helidon-vsc` keeps support for Helidon-specific `microprofile-config-<profile>.properties` files either way.
 
 Works in:
 
@@ -149,6 +152,8 @@ Expected behavior:
 - duplicate YAML keys get a warning and offer `Remove duplicate YAML key`
 
 ### 3. Java support for `Config.get("...")`
+
+Java matching is conservative and focuses on direct string literals passed to `Config.get(...)` on receivers that resolve to Helidon `Config` variables, fields, or static chains such as `Config.global().get(...)`.
 
 What you get:
 
@@ -429,7 +434,8 @@ Open the repo in VS Code and press `F5` to start an Extension Development Host.
 ## Known Limitations
 
 - config filename matching is exact and conservative: supported names are exact `application.properties`, exact `microprofile-config.properties`, `microprofile-config-<profile>.properties`, exact `application.yaml`, and `application-<profile>.yaml`; files such as `application-dev.properties`, `application.yml`, `microprofile-config.yaml`, and `values.yaml` are not recognized
-- Java config support is intentionally conservative and currently focuses on `Config.get("...")` string literals
+- when `Tools for MicroProfile` is installed, `helidon-vsc` intentionally defers exact `application.properties` and exact `microprofile-config.properties` to that extension to avoid overlapping completion/hover/diagnostic providers; `helidon-vsc` still owns `microprofile-config-<profile>.properties`, YAML, Java `Config.get("...")`, and endpoint features
+- Java `Config.get("...")` support uses Java AST matching rather than a broad text regex now, but it still does not use full JDT symbol resolution and remains limited to direct string literals
 - endpoint discovery uses `java-parser` and source parsing, not a full semantic Java symbol model
 - duplicate `.properties` keys are diagnosed, but there is no quick fix to remove them yet
 - YAML quick fixes are conservative and do not attempt structural rewrites for nested/list path issues

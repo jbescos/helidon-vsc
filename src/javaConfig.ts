@@ -10,6 +10,7 @@ import {
 	type HelidonConfigKeyResolution,
 } from './helidonConfig';
 import type { HelidonConfigProperty } from './metadata';
+import { findJavaConfigReferences } from './javaSource';
 
 const JAVA_CONFIG_KEY_PATTERN = /\.get\s*\(\s*"([^"]*)"/gu;
 const CONFIG_FILE_GLOB =
@@ -21,6 +22,13 @@ export interface JavaConfigReference {
 	start: number;
 	end: number;
 }
+
+interface CachedJavaConfigReferences {
+	references: JavaConfigReference[];
+	version: number;
+}
+
+const javaConfigReferenceCache = new Map<string, CachedJavaConfigReferences>();
 
 function propertyMarkdown(property: HelidonConfigProperty): vscode.MarkdownString {
 	const markdown = new vscode.MarkdownString(undefined, true);
@@ -41,11 +49,7 @@ function looksLikeHelidonConfigUsage(source: string): boolean {
 	return /\bio\.helidon\.config\.Config\b/u.test(source) || /\bConfig\b/u.test(source);
 }
 
-export function parseJavaConfigReferences(source: string): JavaConfigReference[] {
-	if (!looksLikeHelidonConfigUsage(source)) {
-		return [];
-	}
-
+function parseJavaConfigReferencesWithPattern(source: string): JavaConfigReference[] {
 	const references: JavaConfigReference[] = [];
 	for (const match of source.matchAll(JAVA_CONFIG_KEY_PATTERN)) {
 		const key = match[1];
@@ -69,15 +73,57 @@ export function parseJavaConfigReferences(source: string): JavaConfigReference[]
 	return references;
 }
 
+export function parseJavaConfigReferences(source: string): JavaConfigReference[] {
+	if (!looksLikeHelidonConfigUsage(source)) {
+		return [];
+	}
+
+	const astReferences = findJavaConfigReferences(source);
+	if (astReferences) {
+		return astReferences.map((reference) => ({
+			key: reference.value,
+			start: reference.start,
+			end: reference.end,
+		}));
+	}
+
+	return parseJavaConfigReferencesWithPattern(source);
+}
+
+function referencesForDocument(document: vscode.TextDocument): JavaConfigReference[] {
+	const cacheKey = document.uri.toString();
+	const cached = javaConfigReferenceCache.get(cacheKey);
+	if (cached && cached.version === document.version) {
+		return cached.references;
+	}
+
+	const references = parseJavaConfigReferences(document.getText());
+	javaConfigReferenceCache.set(cacheKey, { references, version: document.version });
+	return references;
+}
+
 function referenceAtPosition(document: vscode.TextDocument, position: vscode.Position): JavaConfigReference | undefined {
 	const offset = document.offsetAt(position);
-	return parseJavaConfigReferences(document.getText()).find((reference) => reference.start <= offset && offset <= reference.end);
+	return referencesForDocument(document).find((reference) => reference.start <= offset && offset <= reference.end);
 }
 
 function completionContext(
 	document: vscode.TextDocument,
 	position: vscode.Position,
 ): { prefix: string; range: vscode.Range } | undefined {
+	const reference = referenceAtPosition(document, position);
+	if (reference) {
+		const range = new vscode.Range(document.positionAt(reference.start), document.positionAt(reference.end));
+		return {
+			prefix: document.getText(new vscode.Range(range.start, position)),
+			range,
+		};
+	}
+
+	if (!looksLikeHelidonConfigUsage(document.getText())) {
+		return undefined;
+	}
+
 	const line = document.lineAt(position.line).text;
 	const beforeCursor = line.slice(0, position.character);
 	const match = /\.get\s*\(\s*"([^"]*)$/u.exec(beforeCursor);
@@ -116,7 +162,7 @@ export function collectHelidonJavaDiagnostics(document: vscode.TextDocument): vs
 	}
 
 	const diagnostics: vscode.Diagnostic[] = [];
-	for (const reference of parseJavaConfigReferences(document.getText())) {
+	for (const reference of referencesForDocument(document)) {
 		if (!shouldValidateKnownHelidonConfigRoot(reference.key)) {
 			continue;
 		}

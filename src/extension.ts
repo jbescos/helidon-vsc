@@ -10,6 +10,8 @@ import {
 	HelidonPropertiesCompletionProvider,
 	HelidonPropertiesHoverProvider,
 	HelidonYamlCompletionProvider,
+	isHelidonPropertiesDocument,
+	isHelidonYamlDocument,
 	replaceHelidonConfigProperties,
 } from './helidonConfig';
 import {
@@ -35,18 +37,59 @@ import {
 
 const INITIAL_METADATA_RETRY_DELAY_MS = 2000;
 const INITIAL_METADATA_MAX_ATTEMPTS = 15;
+const MICROPROFILE_EXTENSION_ID = 'redhat.vscode-microprofile';
+const MICROPROFILE_MANAGED_HELIDON_PROPERTIES_PATTERN =
+	/(?:^|[\\/])(?:application|microprofile-config)\.properties$/iu;
+
+function hasMicroProfileExtensionInstalled(): boolean {
+	return vscode.extensions.getExtension(MICROPROFILE_EXTENSION_ID) !== undefined;
+}
+
+export function isMicroProfileManagedHelidonPropertiesFile(fileName: string): boolean {
+	return MICROPROFILE_MANAGED_HELIDON_PROPERTIES_PATTERN.test(fileName);
+}
+
+export function buildHelidonPropertiesDocumentSelectors(
+	hasMicroProfileExtension: boolean,
+): vscode.DocumentFilter[] {
+	const fileSelectors: vscode.DocumentFilter[] = [
+		{ scheme: 'file', pattern: '**/microprofile-config-*.properties' },
+	];
+	const untitledSelectors: vscode.DocumentFilter[] = [
+		{ scheme: 'untitled', pattern: '**/microprofile-config-*.properties' },
+	];
+
+	if (hasMicroProfileExtension) {
+		return [...fileSelectors, ...untitledSelectors];
+	}
+
+	return [
+		{ scheme: 'file', pattern: '**/application.properties' },
+		{ scheme: 'file', pattern: '**/microprofile-config.properties' },
+		...fileSelectors,
+		{ scheme: 'untitled', pattern: '**/application.properties' },
+		{ scheme: 'untitled', pattern: '**/microprofile-config.properties' },
+		...untitledSelectors,
+	];
+}
+
+export function shouldUseCustomHelidonPropertiesFeatures(
+	document: Pick<vscode.TextDocument, 'fileName'>,
+	hasMicroProfileExtension: boolean,
+): boolean {
+	return !hasMicroProfileExtension || !isMicroProfileManagedHelidonPropertiesFile(document.fileName);
+}
 
 export function activate(context: vscode.ExtensionContext) {
 	const output = vscode.window.createOutputChannel('Helidon');
 	output.appendLine('Helidon VS Code extension is active.');
-	const helidonPropertiesDocumentSelectors: vscode.DocumentSelector = [
-		{ scheme: 'file', pattern: '**/application.properties' },
-		{ scheme: 'file', pattern: '**/microprofile-config.properties' },
-		{ scheme: 'file', pattern: '**/microprofile-config-*.properties' },
-		{ scheme: 'untitled', pattern: '**/application.properties' },
-		{ scheme: 'untitled', pattern: '**/microprofile-config.properties' },
-		{ scheme: 'untitled', pattern: '**/microprofile-config-*.properties' },
-	];
+	const hasMicroProfileExtension = hasMicroProfileExtensionInstalled();
+	output.appendLine(
+		hasMicroProfileExtension
+			? 'Tools for MicroProfile detected; helidon-vsc defers exact application.properties and microprofile-config.properties to it and keeps Helidon-only properties, YAML, Java, and endpoint features.'
+			: 'Tools for MicroProfile is not installed; helidon-vsc registers its full custom properties support.'
+	);
+	const helidonPropertiesDocumentSelectors = buildHelidonPropertiesDocumentSelectors(hasMicroProfileExtension);
 	const runStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 	runStatusBarItem.name = 'Helidon Run Project';
 	runStatusBarItem.text = '$(run) Helidon';
@@ -295,7 +338,14 @@ export function activate(context: vscode.ExtensionContext) {
 	};
 
 	const refreshDiagnostics = (document: vscode.TextDocument) => {
-		const issues = [...collectHelidonDiagnostics(document), ...collectHelidonJavaDiagnostics(document)];
+		const shouldCollectHelidonDocumentDiagnostics =
+			isHelidonYamlDocument(document) ||
+			(isHelidonPropertiesDocument(document) &&
+				shouldUseCustomHelidonPropertiesFeatures(document, hasMicroProfileExtension));
+		const issues = [
+			...(shouldCollectHelidonDocumentDiagnostics ? collectHelidonDiagnostics(document) : []),
+			...collectHelidonJavaDiagnostics(document),
+		];
 		if (issues.length === 0) {
 			diagnostics.delete(document.uri);
 			return;

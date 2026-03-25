@@ -80,7 +80,10 @@ interface JavaParserModule {
 	lexAndParse(inputText: string): { cst: CstNode; tokens: IToken[] };
 }
 
+const HELIDON_CONFIG_TYPE = 'io.helidon.config.Config';
+
 let javaParserPromise: Promise<JavaParserModule> | undefined;
+let javaParserSync: JavaParserModule | undefined;
 
 async function getJavaParser(): Promise<JavaParserModule> {
 	if (!javaParserPromise) {
@@ -88,6 +91,15 @@ async function getJavaParser(): Promise<JavaParserModule> {
 	}
 
 	return javaParserPromise;
+}
+
+function getJavaParserSync(): JavaParserModule {
+	if (!javaParserSync) {
+		javaParserSync = require('java-parser') as JavaParserModule;
+		javaParserPromise ??= Promise.resolve(javaParserSync);
+	}
+
+	return javaParserSync;
 }
 
 function unknownExpression(): JavaExpressionInfo {
@@ -239,6 +251,40 @@ function extractQualifiedName(node: CstNode | undefined): string {
 function extractLastIdentifier(node: CstNode | undefined): string | undefined {
 	const identifiers = collectDescendantTokens(node, 'Identifier');
 	return identifiers[identifiers.length - 1]?.image;
+}
+
+function collectImportNames(root: CstNode): Set<string> {
+	const importNames = new Set<string>();
+	for (const compilationUnit of childNodes(root, 'ordinaryCompilationUnit')) {
+		for (const importDeclaration of childNodes(compilationUnit, 'importDeclaration')) {
+			const importedName = extractQualifiedName(firstChildNode(importDeclaration, 'packageOrTypeName'));
+			if (!importedName) {
+				continue;
+			}
+
+			if (childTokens(importDeclaration, 'Star').length > 0) {
+				importNames.add(`${importedName}.*`);
+				continue;
+			}
+
+			importNames.add(importedName);
+		}
+	}
+
+	return importNames;
+}
+
+function importsHelidonConfigType(importNames: ReadonlySet<string>): boolean {
+	return importNames.has(HELIDON_CONFIG_TYPE) || importNames.has('io.helidon.config.*');
+}
+
+function isHelidonConfigType(typeNode: CstNode | undefined, importNames: ReadonlySet<string>): boolean {
+	const typeName = extractQualifiedName(typeNode);
+	if (typeName === HELIDON_CONFIG_TYPE) {
+		return true;
+	}
+
+	return extractLastIdentifier(typeNode) === 'Config' && importsHelidonConfigType(importNames);
 }
 
 function extractStringLiteral(node: CstNode | undefined): JavaExpressionInfo | undefined {
@@ -418,6 +464,68 @@ function bindVariableDeclaration(node: CstNode, bindings: VariableBindings): voi
 	}
 }
 
+function declaredVariableNames(declaratorList: CstNode | undefined): string[] {
+	return childNodes(declaratorList, 'variableDeclarator')
+		.map((declarator) => childTokens(firstChildNode(declarator, 'variableDeclaratorId'), 'Identifier')[0]?.image)
+		.filter((name): name is string => Boolean(name));
+}
+
+function collectConfigFieldBindings(
+	body: CstNode | undefined,
+	importNames: ReadonlySet<string>,
+): Set<string> {
+	const bindings = new Set<string>();
+	for (const declaration of childNodes(body, 'classBodyDeclaration')) {
+		const member = firstChildNode(declaration, 'classMemberDeclaration');
+		const fieldDeclaration = firstChildNode(member, 'fieldDeclaration');
+		if (!fieldDeclaration || !isHelidonConfigType(firstChildNode(fieldDeclaration, 'unannType'), importNames)) {
+			continue;
+		}
+
+		for (const name of declaredVariableNames(firstChildNode(fieldDeclaration, 'variableDeclaratorList'))) {
+			bindings.add(name);
+		}
+	}
+
+	return bindings;
+}
+
+function collectConfigParameterBindings(
+	methodDeclaration: CstNode,
+	importNames: ReadonlySet<string>,
+): Set<string> {
+	const bindings = new Set<string>();
+	const methodDeclarator = firstChildNode(firstChildNode(methodDeclaration, 'methodHeader'), 'methodDeclarator');
+	for (const parameter of collectDescendantNodes(methodDeclarator, 'formalParameter')) {
+		const regularParameter = firstChildNode(parameter, 'variableParaRegularParameter');
+		if (!regularParameter || !isHelidonConfigType(firstChildNode(regularParameter, 'unannType'), importNames)) {
+			continue;
+		}
+
+		const name = childTokens(firstChildNode(regularParameter, 'variableDeclaratorId'), 'Identifier')[0]?.image;
+		if (name) {
+			bindings.add(name);
+		}
+	}
+
+	return bindings;
+}
+
+function bindConfigLocalVariables(
+	node: CstNode,
+	bindings: Set<string>,
+	importNames: ReadonlySet<string>,
+): void {
+	const typeNode = firstChildNode(firstChildNode(node, 'localVariableType'), 'unannType');
+	if (!isHelidonConfigType(typeNode, importNames)) {
+		return;
+	}
+
+	for (const name of declaredVariableNames(firstChildNode(node, 'variableDeclaratorList'))) {
+		bindings.add(name);
+	}
+}
+
 function methodInvocationInfo(
 	node: CstNode,
 	tokens: readonly IToken[],
@@ -449,6 +557,92 @@ function methodInvocationInfo(
 		methodTokenIndex,
 		arguments: expressions.map((expression) => resolveExpression(expression, bindings)),
 	};
+}
+
+function matchingOpeningParenIndex(tokens: readonly IToken[], closingParenIndex: number): number {
+	let depth = 0;
+	for (let index = closingParenIndex; index >= 0; index -= 1) {
+		const tokenType = tokens[index]?.tokenType.name;
+		if (tokenType === 'RBrace') {
+			depth += 1;
+			continue;
+		}
+
+		if (tokenType !== 'LBrace') {
+			continue;
+		}
+
+		depth -= 1;
+		if (depth === 0) {
+			return index;
+		}
+	}
+
+	return -1;
+}
+
+function qualifiedIdentifierEndingAt(tokens: readonly IToken[], endIndex: number): string | undefined {
+	const endToken = tokens[endIndex];
+	if (!endToken || endToken.tokenType.name !== 'Identifier') {
+		return undefined;
+	}
+
+	const parts = [endToken.image];
+	let index = endIndex - 1;
+	while (index >= 1) {
+		const dotToken = tokens[index];
+		const identifierToken = tokens[index - 1];
+		if (dotToken?.tokenType.name !== 'Dot' || identifierToken?.tokenType.name !== 'Identifier') {
+			break;
+		}
+
+		parts.unshift(identifierToken.image);
+		index -= 2;
+	}
+
+	return parts.join('.');
+}
+
+function receiverMatchesHelidonConfig(
+	tokens: readonly IToken[],
+	receiverEndIndex: number,
+	configBindings: ReadonlySet<string>,
+	importNames: ReadonlySet<string>,
+): boolean {
+	if (receiverEndIndex < 0) {
+		return false;
+	}
+
+	const receiverToken = tokens[receiverEndIndex];
+	if (!receiverToken) {
+		return false;
+	}
+
+	if (receiverToken.tokenType.name === 'Identifier') {
+		if (configBindings.has(receiverToken.image)) {
+			return true;
+		}
+
+		const qualifiedName = qualifiedIdentifierEndingAt(tokens, receiverEndIndex);
+		return qualifiedName === HELIDON_CONFIG_TYPE
+			|| (qualifiedName === 'Config' && importsHelidonConfigType(importNames));
+	}
+
+	if (receiverToken.tokenType.name !== 'RBrace') {
+		return false;
+	}
+
+	const openingParenIndex = matchingOpeningParenIndex(tokens, receiverEndIndex);
+	if (openingParenIndex < 3) {
+		return false;
+	}
+
+	if (tokens[openingParenIndex - 1]?.tokenType.name !== 'Identifier'
+		|| tokens[openingParenIndex - 2]?.tokenType.name !== 'Dot') {
+		return false;
+	}
+
+	return receiverMatchesHelidonConfig(tokens, openingParenIndex - 3, configBindings, importNames);
 }
 
 function collectFieldBindings(body: CstNode | undefined): VariableBindings {
@@ -496,6 +690,63 @@ function collectMethodInvocations(
 	}
 
 	return invocations;
+}
+
+function collectJavaConfigReferencesFromMethod(
+	methodDeclaration: CstNode,
+	tokens: readonly IToken[],
+	tokenIndexByOffset: ReadonlyMap<number, number>,
+	initialBindings: ReadonlyMap<string, JavaExpressionInfo>,
+	initialConfigBindings: ReadonlySet<string>,
+	importNames: ReadonlySet<string>,
+): JavaStringReference[] {
+	const methodBody = firstChildNode(firstChildNode(methodDeclaration, 'methodBody'), 'block');
+	if (!methodBody) {
+		return [];
+	}
+
+	const bindings: VariableBindings = new Map(initialBindings);
+	const configBindings = new Set(initialConfigBindings);
+	for (const name of collectConfigParameterBindings(methodDeclaration, importNames)) {
+		configBindings.add(name);
+	}
+
+	const orderedNodes = [
+		...collectDescendantNodes(methodBody, 'localVariableDeclaration').map((node) => ({ kind: 'local' as const, node })),
+		...collectDescendantNodes(methodBody, 'methodInvocationSuffix').map((node) => ({ kind: 'invocation' as const, node })),
+	].sort((left, right) => left.node.location.startOffset - right.node.location.startOffset);
+
+	const references: JavaStringReference[] = [];
+	for (const entry of orderedNodes) {
+		if (entry.kind === 'local') {
+			bindVariableDeclaration(entry.node, bindings);
+			bindConfigLocalVariables(entry.node, configBindings, importNames);
+			continue;
+		}
+
+		const invocation = methodInvocationInfo(entry.node, tokens, tokenIndexByOffset, bindings);
+		if (!invocation || invocation.name !== 'get') {
+			continue;
+		}
+
+		if (tokens[invocation.methodTokenIndex - 1]?.tokenType.name !== 'Dot'
+			|| !receiverMatchesHelidonConfig(tokens, invocation.methodTokenIndex - 2, configBindings, importNames)) {
+			continue;
+		}
+
+		const firstArgument = invocation.arguments[0];
+		if (!firstArgument || firstArgument.kind !== 'string') {
+			continue;
+		}
+
+		if (firstArgument.start < entry.node.location.startOffset || firstArgument.end > entry.node.location.endOffset) {
+			continue;
+		}
+
+		references.push(firstArgument);
+	}
+
+	return references;
 }
 
 function extractMethodDeclaration(
@@ -596,6 +847,98 @@ function collectTopLevelClasses(
 	return classes;
 }
 
+function collectJavaConfigReferencesFromClassDeclaration(
+	node: CstNode,
+	tokens: readonly IToken[],
+	tokenIndexByOffset: ReadonlyMap<number, number>,
+	importNames: ReadonlySet<string>,
+	results: JavaStringReference[],
+	inheritedBindings: ReadonlyMap<string, JavaExpressionInfo> = new Map(),
+	inheritedConfigBindings: ReadonlySet<string> = new Set(),
+): void {
+	const normalClassDeclaration = firstChildNode(node, 'normalClassDeclaration');
+	if (!normalClassDeclaration) {
+		return;
+	}
+
+	const classBody = firstChildNode(normalClassDeclaration, 'classBody');
+	const fieldBindings: VariableBindings = new Map(inheritedBindings);
+	for (const [name, expression] of collectFieldBindings(classBody)) {
+		fieldBindings.set(name, expression);
+	}
+
+	const configBindings = new Set(inheritedConfigBindings);
+	for (const name of collectConfigFieldBindings(classBody, importNames)) {
+		configBindings.add(name);
+	}
+
+	for (const declaration of childNodes(classBody, 'classBodyDeclaration')) {
+		const member = firstChildNode(declaration, 'classMemberDeclaration');
+		if (!member) {
+			continue;
+		}
+
+		const methodDeclaration = firstChildNode(member, 'methodDeclaration');
+		if (methodDeclaration) {
+			results.push(
+				...collectJavaConfigReferencesFromMethod(
+					methodDeclaration,
+					tokens,
+					tokenIndexByOffset,
+					fieldBindings,
+					configBindings,
+					importNames,
+				),
+			);
+			continue;
+		}
+
+		const innerClassDeclaration = firstChildNode(member, 'classDeclaration');
+		if (innerClassDeclaration) {
+			collectJavaConfigReferencesFromClassDeclaration(
+				innerClassDeclaration,
+				tokens,
+				tokenIndexByOffset,
+				importNames,
+				results,
+				fieldBindings,
+				configBindings,
+			);
+		}
+	}
+}
+
+function collectJavaConfigReferences(
+	root: CstNode,
+	tokens: readonly IToken[],
+	tokenIndexByOffset: ReadonlyMap<number, number>,
+): JavaStringReference[] {
+	const importNames = collectImportNames(root);
+	if (!importsHelidonConfigType(importNames) && !tokens.some((token) => token.image === 'Config')) {
+		return [];
+	}
+
+	const references: JavaStringReference[] = [];
+	for (const compilationUnit of childNodes(root, 'ordinaryCompilationUnit')) {
+		for (const typeDeclaration of childNodes(compilationUnit, 'typeDeclaration')) {
+			const classDeclaration = firstChildNode(typeDeclaration, 'classDeclaration');
+			if (!classDeclaration) {
+				continue;
+			}
+
+			collectJavaConfigReferencesFromClassDeclaration(
+				classDeclaration,
+				tokens,
+				tokenIndexByOffset,
+				importNames,
+				references,
+			);
+		}
+	}
+
+	return references;
+}
+
 function walkClasses(classes: readonly JavaClassInfo[], consumer: (classInfo: JavaClassInfo) => void): void {
 	for (const classInfo of classes) {
 		consumer(classInfo);
@@ -619,9 +962,12 @@ function hasPathParametersReceiver(tokens: readonly IToken[], methodTokenIndex: 
 		&& receiverName.image === 'pathParameters';
 }
 
-export async function parseJavaSourceModel(source: string): Promise<JavaSourceModel | undefined> {
+function parseJavaSourceModelWithParser(
+	source: string,
+	parser: JavaParserModule,
+): JavaSourceModel | undefined {
 	try {
-		const { lexAndParse } = await getJavaParser();
+		const { lexAndParse } = parser;
 		const { cst, tokens } = lexAndParse(source);
 		const tokenIndexByOffset = new Map<number, number>();
 		tokens.forEach((token, index) => {
@@ -632,6 +978,29 @@ export async function parseJavaSourceModel(source: string): Promise<JavaSourceMo
 			classes: collectTopLevelClasses(cst, tokens, tokenIndexByOffset),
 			tokens,
 		};
+	} catch {
+		return undefined;
+	}
+}
+
+export async function parseJavaSourceModel(source: string): Promise<JavaSourceModel | undefined> {
+	return parseJavaSourceModelWithParser(source, await getJavaParser());
+}
+
+export function parseJavaSourceModelSync(source: string): JavaSourceModel | undefined {
+	return parseJavaSourceModelWithParser(source, getJavaParserSync());
+}
+
+export function findJavaConfigReferences(source: string): JavaStringReference[] | undefined {
+	try {
+		const { lexAndParse } = getJavaParserSync();
+		const { cst, tokens } = lexAndParse(source);
+		const tokenIndexByOffset = new Map<number, number>();
+		tokens.forEach((token, index) => {
+			tokenIndexByOffset.set(token.startOffset, index);
+		});
+
+		return collectJavaConfigReferences(cst, tokens, tokenIndexByOffset);
 	} catch {
 		return undefined;
 	}

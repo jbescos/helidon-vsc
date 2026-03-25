@@ -25,6 +25,9 @@
   "extensionDependencies": [
     "redhat.java"
   ],
+  "extensionPack": [
+    "redhat.vscode-microprofile"
+  ],
   "contributes": {
     "commands": [
       {
@@ -53,6 +56,30 @@
         {
           "id": "helidonEndpoints",
           "name": "Helidon"
+        }
+      ]
+    },
+    "microprofile": {
+      "documentSelector": [
+        {
+          "scheme": "file",
+          "language": "properties",
+          "pattern": "**/application.properties"
+        },
+        {
+          "scheme": "file",
+          "language": "java-properties",
+          "pattern": "**/application.properties"
+        },
+        {
+          "scheme": "untitled",
+          "language": "properties",
+          "pattern": "**/application.properties"
+        },
+        {
+          "scheme": "untitled",
+          "language": "java-properties",
+          "pattern": "**/application.properties"
         }
       ]
     },
