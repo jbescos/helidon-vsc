@@ -361,6 +361,7 @@ Implemented the first actual run/debug workflow on top of the earlier scaffold g
 - new commands:
   - `Helidon: Run Project`
   - `Helidon: Debug Project`
+  - `Helidon: Stop Project`
 - both commands:
   - pick the target workspace folder when needed
   - refresh `.vscode/tasks.json` and `.vscode/launch.json` before launching
@@ -373,6 +374,14 @@ Implemented the first actual run/debug workflow on top of the earlier scaffold g
   - falls back to `io.helidon.Main` for likely Helidon MicroProfile projects
 - generated Maven run task behavior improved:
   - now uses `org.codehaus.mojo:exec-maven-plugin` with the resolved main class instead of a bare `exec:java` assumption
+- UI entry points added:
+  - always-visible status bar buttons for Run and Debug when a workspace folder is open
+  - status bar Stop button while a Helidon session/task is active
+  - toolbar buttons in the `Helidon Endpoints` view title for Run, Debug, Stop, Generate Run Files, and Refresh
+  - Explorer folder context-menu actions for Run, Debug, Stop, and Generate Run Files
+  - Explorer-triggered actions resolve the selected folder back to its open workspace folder before launch
+  - view-title actions were hardened to accept tree-view payloads such as selected endpoint/group items
+  - Stop targets tracked Helidon Java launch sessions first and falls back to terminating Helidon tasks
 
 Important scope note:
 - this is still built on standard VS Code Java launch/debug support, not a custom Helidon runtime panel or dashboard
@@ -717,6 +726,7 @@ Also defer competitor benchmarking until the Helidon extension is in a more comp
 - [x] optional `.vscode/launch.json` / `.vscode/tasks.json` helper generation
 - [x] `Helidon: Run Project` helper command
 - [x] `Helidon: Debug Project` helper command
+- [x] `Helidon: Stop Project` helper command
 
 ### Not implemented yet
 - [ ] duplicate `.properties` key diagnostics, if product direction wants them
@@ -806,6 +816,7 @@ If inspections are tackled, be conservative because missing classpath metadata c
    - command palette → `Helidon: Generate Run Files`
    - command palette → `Helidon: Run Project`
    - command palette → `Helidon: Debug Project`
+   - command palette → `Helidon: Stop Project`
    - command palette → `Helidon: Reload Extension` (debug only)
 
 ---

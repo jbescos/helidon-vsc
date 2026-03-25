@@ -23,6 +23,9 @@ import {
 	buildHelidonRunTask,
 	buildLegacyMavenGenerateArgs,
 	buildProjectGenerationModePicks,
+	extractWorkspaceUriFromTarget,
+	isHelidonDebugSession,
+	isHelidonTaskExecution,
 	isLikelyHelidonMicroProfileProject,
 	LEGACY_ARCHETYPES,
 	resolveHelidonLaunchMainClass,
@@ -982,6 +985,58 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(picks[0].mode, undefined);
 		assert.strictEqual(picks[1].label, 'Maven Archetype Generator');
 		assert.strictEqual(picks[1].mode, 'maven-archetype');
+	});
+
+	test('workspace target extraction understands direct URIs and Helidon endpoint tree payloads', () => {
+		const uri = vscode.Uri.file('/tmp/demo-helidon/src/main/java/com/example/Main.java');
+		assert.strictEqual(extractWorkspaceUriFromTarget(uri)?.toString(), uri.toString());
+		assert.strictEqual(extractWorkspaceUriFromTarget({ uri })?.toString(), uri.toString());
+		assert.strictEqual(extractWorkspaceUriFromTarget({ endpoint: { uri } })?.toString(), uri.toString());
+		assert.strictEqual(extractWorkspaceUriFromTarget({ group: { uri } })?.toString(), uri.toString());
+		assert.strictEqual(extractWorkspaceUriFromTarget({ viewId: 'helidonEndpoints' }), undefined);
+	});
+
+	test('Helidon debug session detection matches the generated Java launch configuration', () => {
+		assert.strictEqual(
+			isHelidonDebugSession({
+				type: 'java',
+				name: 'Launch Helidon Application',
+				configuration: { type: 'java', request: 'launch', name: 'Launch Helidon Application' },
+			} as vscode.DebugSession),
+			true
+		);
+		assert.strictEqual(
+			isHelidonDebugSession({
+				type: 'java',
+				name: 'Something Else',
+				configuration: { type: 'java', request: 'launch', name: 'Something Else' },
+			} as vscode.DebugSession),
+			false
+		);
+	});
+
+	test('Helidon task execution detection matches generated helidon tasks', () => {
+		const runTask = new vscode.Task(
+			{ type: 'shell' },
+			vscode.TaskScope.Workspace,
+			'helidon: run',
+			'helidon-vsc'
+		);
+		const buildTask = new vscode.Task(
+			{ type: 'shell' },
+			vscode.TaskScope.Workspace,
+			'helidon: build',
+			'helidon-vsc'
+		);
+		const otherTask = new vscode.Task(
+			{ type: 'shell' },
+			vscode.TaskScope.Workspace,
+			'mvn package',
+			'helidon-vsc'
+		);
+		assert.strictEqual(isHelidonTaskExecution({ task: runTask } as vscode.TaskExecution), true);
+		assert.strictEqual(isHelidonTaskExecution({ task: buildTask } as vscode.TaskExecution), true);
+		assert.strictEqual(isHelidonTaskExecution({ task: otherTask } as vscode.TaskExecution), false);
 	});
 
 	test('legacy generator builds Maven archetype arguments', () => {

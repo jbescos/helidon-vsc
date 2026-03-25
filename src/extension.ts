@@ -14,9 +14,12 @@ import {
 } from './helidonConfig';
 import {
 	debugHelidonProject,
+	extractWorkspaceUriFromTarget,
 	generateHelidonProject,
 	generateHelidonProjectWithCliWizard,
 	generateHelidonRunFiles,
+	isHelidonDebugSession,
+	isHelidonTaskExecution,
 	runHelidonProject,
 } from './generator';
 import {
@@ -38,12 +41,28 @@ const INITIAL_METADATA_MAX_ATTEMPTS = 15;
 export function activate(context: vscode.ExtensionContext) {
 	const output = vscode.window.createOutputChannel('Helidon');
 	output.appendLine('Helidon VS Code extension is active.');
+	const runStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+	runStatusBarItem.name = 'Helidon Run Project';
+	runStatusBarItem.text = '$(run) Helidon';
+	runStatusBarItem.tooltip = 'Run the current Helidon project';
+	runStatusBarItem.command = 'helidon-vsc.runProject';
+	const debugStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+	debugStatusBarItem.name = 'Helidon Debug Project';
+	debugStatusBarItem.text = '$(debug) Helidon';
+	debugStatusBarItem.tooltip = 'Debug the current Helidon project';
+	debugStatusBarItem.command = 'helidon-vsc.debugProject';
+	const stopStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 98);
+	stopStatusBarItem.name = 'Helidon Stop Project';
+	stopStatusBarItem.text = '$(debug-stop) Helidon';
+	stopStatusBarItem.tooltip = 'Stop the current Helidon project';
+	stopStatusBarItem.command = 'helidon-vsc.stopProject';
 	const diagnostics = vscode.languages.createDiagnosticCollection('helidon-vsc');
 	const endpointsProvider = new HelidonEndpointsTreeDataProvider();
 	const endpointsView = vscode.window.createTreeView('helidonEndpoints', {
 		treeDataProvider: endpointsProvider,
 		showCollapseAll: true,
 	});
+	const helidonDebugSessions = new Map<string, vscode.DebugSession>();
 	let missingJavaExtensionWarningShown = false;
 	let metadataUnavailableWarningShown = false;
 	let metadataBootstrapComplete = false;
@@ -145,17 +164,106 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	);
 
-	const generateRunFilesCommand = vscode.commands.registerCommand('helidon-vsc.generateRunFiles', async () => {
-		await generateHelidonRunFiles();
-	});
+	const generateRunFilesCommand = vscode.commands.registerCommand(
+		'helidon-vsc.generateRunFiles',
+		async (target?: unknown) => {
+			await generateHelidonRunFiles(target);
+		}
+	);
 
-	const runProjectCommand = vscode.commands.registerCommand('helidon-vsc.runProject', async () => {
-		await runHelidonProject();
-	});
+	const runProjectCommand = vscode.commands.registerCommand(
+		'helidon-vsc.runProject',
+		async (target?: unknown) => {
+			await runHelidonProject(target);
+		}
+	);
 
-	const debugProjectCommand = vscode.commands.registerCommand('helidon-vsc.debugProject', async () => {
-		await debugHelidonProject();
-	});
+	const debugProjectCommand = vscode.commands.registerCommand(
+		'helidon-vsc.debugProject',
+		async (target?: unknown) => {
+			await debugHelidonProject(target);
+		}
+	);
+
+	const isWorkspaceFolderTarget = (target: unknown): target is vscode.WorkspaceFolder =>
+		typeof target === 'object' &&
+		target !== null &&
+		'uri' in target &&
+		target.uri instanceof vscode.Uri &&
+		'name' in target &&
+		typeof target.name === 'string' &&
+		'index' in target &&
+		typeof target.index === 'number';
+
+	const resolveWorkspaceFolderFromTarget = (target: unknown): vscode.WorkspaceFolder | undefined => {
+		if (isWorkspaceFolderTarget(target)) {
+			return target;
+		}
+
+		const uri = extractWorkspaceUriFromTarget(target);
+		return uri ? vscode.workspace.getWorkspaceFolder(uri) : undefined;
+	};
+
+	const isWorkspaceFolderScope = (
+		scope: vscode.Task['scope']
+	): scope is vscode.WorkspaceFolder =>
+		typeof scope === 'object' && scope !== null && 'uri' in scope && scope.uri instanceof vscode.Uri;
+
+	const taskExecutionMatchesWorkspaceFolder = (
+		execution: vscode.TaskExecution,
+		workspaceFolder: vscode.WorkspaceFolder | undefined
+	): boolean => {
+		if (!workspaceFolder) {
+			return true;
+		}
+
+		return isWorkspaceFolderScope(execution.task.scope)
+			? execution.task.scope.uri.toString() === workspaceFolder.uri.toString()
+			: false;
+	};
+
+	const stopProjectCommand = vscode.commands.registerCommand(
+		'helidon-vsc.stopProject',
+		async (target?: unknown) => {
+			const targetUri = extractWorkspaceUriFromTarget(target);
+			const workspaceFolder = resolveWorkspaceFolderFromTarget(target);
+			if (targetUri && !workspaceFolder) {
+				await vscode.window.showWarningMessage(
+					'The selected folder is not an open VS Code workspace folder. Open it as a workspace folder to use Helidon stop actions from Explorer.'
+				);
+				return;
+			}
+
+			const matchingSessions = [...helidonDebugSessions.values()].filter(
+				(session) =>
+					!workspaceFolder || session.workspaceFolder?.uri.toString() === workspaceFolder.uri.toString()
+			);
+			if (matchingSessions.length > 0) {
+				for (const session of matchingSessions) {
+					await vscode.debug.stopDebugging(session);
+				}
+				return;
+			}
+
+			const matchingTaskExecutions = vscode.tasks.taskExecutions.filter(
+				(execution) =>
+					isHelidonTaskExecution(execution) &&
+					taskExecutionMatchesWorkspaceFolder(execution, workspaceFolder)
+			);
+			if (matchingTaskExecutions.length > 0) {
+				for (const execution of matchingTaskExecutions) {
+					execution.terminate();
+				}
+				return;
+			}
+
+			await vscode.window.showInformationMessage(
+				workspaceFolder
+					? `No active Helidon run/debug session was found in ${workspaceFolder.name}.`
+					: 'No active Helidon run/debug session was found.'
+			);
+		}
+	);
 
 	const reloadExtensionCommand = vscode.commands.registerCommand('helidon-vsc.reloadExtension', async () => {
 		await vscode.commands.executeCommand('workbench.action.reloadWindow');
@@ -183,6 +291,31 @@ export function activate(context: vscode.ExtensionContext) {
 		const endpointCount = await endpointsProvider.endpointCount();
 		endpointsView.message =
 			endpointCount === 0 ? 'No Helidon endpoints found in workspace Java sources.' : undefined;
+	};
+
+	const updateStatusBarItems = () => {
+		if ((vscode.workspace.workspaceFolders ?? []).length === 0) {
+			runStatusBarItem.hide();
+			debugStatusBarItem.hide();
+			stopStatusBarItem.hide();
+			return;
+		}
+
+		runStatusBarItem.show();
+		debugStatusBarItem.show();
+	};
+
+	const updateRunningContext = async () => {
+		const hasActiveHelidonExecution =
+			helidonDebugSessions.size > 0 ||
+			vscode.tasks.taskExecutions.some((execution) => isHelidonTaskExecution(execution));
+		await vscode.commands.executeCommand('setContext', 'helidonVsc.canStopProject', hasActiveHelidonExecution);
+		if (hasActiveHelidonExecution) {
+			stopStatusBarItem.show();
+			return;
+		}
+
+		stopStatusBarItem.hide();
 	};
 
 	const refreshEndpointsCommand = vscode.commands.registerCommand('helidon-vsc.refreshEndpoints', async () => {
@@ -314,6 +447,11 @@ export function activate(context: vscode.ExtensionContext) {
 
 	refreshAllDiagnostics();
 	void refreshEndpointsView();
+	if (vscode.debug.activeDebugSession && isHelidonDebugSession(vscode.debug.activeDebugSession)) {
+		helidonDebugSessions.set(vscode.debug.activeDebugSession.id, vscode.debug.activeDebugSession);
+	}
+	updateStatusBarItems();
+	void updateRunningContext();
 
 	const openDocumentDiagnostics = vscode.workspace.onDidOpenTextDocument(refreshDiagnostics);
 	const changeDocumentDiagnostics = vscode.workspace.onDidChangeTextDocument((event) => {
@@ -328,6 +466,24 @@ export function activate(context: vscode.ExtensionContext) {
 	const workspaceFoldersChanged = vscode.workspace.onDidChangeWorkspaceFolders(() => {
 		void refreshMetadataFromJavaClasspaths();
 		void refreshEndpointsView();
+		updateStatusBarItems();
+		void updateRunningContext();
+	});
+	const debugSessionStarted = vscode.debug.onDidStartDebugSession((session) => {
+		if (isHelidonDebugSession(session)) {
+			helidonDebugSessions.set(session.id, session);
+		}
+		void updateRunningContext();
+	});
+	const debugSessionTerminated = vscode.debug.onDidTerminateDebugSession((session) => {
+		helidonDebugSessions.delete(session.id);
+		void updateRunningContext();
+	});
+	const taskStarted = vscode.tasks.onDidStartTask(() => {
+		void updateRunningContext();
+	});
+	const taskEnded = vscode.tasks.onDidEndTask(() => {
+		void updateRunningContext();
 	});
 	const javaFileCreated = vscode.workspace.onDidCreateFiles((event) => {
 		if (event.files.some((file) => file.path.endsWith('.java'))) {
@@ -352,6 +508,9 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
 		diagnostics,
 		output,
+		runStatusBarItem,
+		debugStatusBarItem,
+		stopStatusBarItem,
 		endpointsView,
 		new vscode.Disposable(clearMetadataRetry),
 		completionProvider,
@@ -369,6 +528,7 @@ export function activate(context: vscode.ExtensionContext) {
 		generateRunFilesCommand,
 		runProjectCommand,
 		debugProjectCommand,
+		stopProjectCommand,
 		reloadExtensionCommand,
 		openEndpointCommand,
 		refreshEndpointsCommand,
@@ -376,6 +536,10 @@ export function activate(context: vscode.ExtensionContext) {
 		changeDocumentDiagnostics,
 		closeDocumentDiagnostics,
 		workspaceFoldersChanged,
+		debugSessionStarted,
+		debugSessionTerminated,
+		taskStarted,
+		taskEnded,
 		javaFileCreated,
 		javaFileDeleted,
 		javaFileRenamed,

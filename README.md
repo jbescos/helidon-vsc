@@ -27,7 +27,8 @@ Current feature set:
 - Helidon project generation via the Helidon CLI wizard when `helidon` is installed
 - Built-in Helidon Maven archetype project generation fallback
 - `Helidon: Generate Run Files` to create `.vscode/launch.json` and `.vscode/tasks.json` entries for an opened Helidon project
-- `Helidon: Run Project` and `Helidon: Debug Project` to launch the selected Helidon workspace through the Java launcher with the generated run/debug scaffold
+- `Helidon: Run Project`, `Helidon: Debug Project`, and `Helidon: Stop Project` for a basic Helidon run/debug lifecycle
+- always-visible status bar buttons for Run and Debug, plus a Stop button while a Helidon session/task is active; toolbar buttons for Run, Debug, Stop, Generate Run Files, and Refresh in the `Helidon Endpoints` view; and Explorer folder context-menu actions for Run, Debug, Stop, and Generate Run Files
 
 When editing an `application.properties` or `microprofile-config.properties` file, typing prefixes like `server.` will offer Helidon configuration keys such as:
 
@@ -145,7 +146,7 @@ Supported built-in fallback archetype choices right now:
 - `helidon-database-se`
 - `helidon-database-mp`
 
-The extension also includes **Helidon: Generate Run Files**, **Helidon: Run Project**, and **Helidon: Debug Project**.
+The extension also includes **Helidon: Generate Run Files**, **Helidon: Run Project**, **Helidon: Debug Project**, and **Helidon: Stop Project**.
 
 Current behavior:
 
@@ -155,6 +156,10 @@ Current behavior:
 - creates or updates `.vscode/launch.json` with a Java launch configuration that uses the integrated terminal
 - `Helidon: Run Project` refreshes that scaffold and starts the Java launcher in no-debug mode
 - `Helidon: Debug Project` refreshes that scaffold and starts the Java debugger
+- `Helidon: Stop Project` stops matching Helidon Java launch sessions and falls back to terminating Helidon tasks when needed
+- status bar shortcuts expose always-visible Run and Debug actions when a workspace folder is open, and a Stop action while a Helidon session/task is active
+- the `Helidon Endpoints` view title exposes button shortcuts for Run, Debug, Stop, Generate Run Files, and Refresh
+- Explorer folder context menus expose Run, Debug, Stop, and Generate Run Files for open workspace folders
 - reuses existing `.vscode` files instead of replacing unrelated entries
 
 ## Requirements

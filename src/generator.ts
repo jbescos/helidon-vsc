@@ -7,7 +7,7 @@ import { promisify } from 'util';
 const execFileAsync = promisify(execFile);
 const HELIDON_BUILD_TASK_LABEL = 'helidon: build';
 const HELIDON_RUN_TASK_LABEL = 'helidon: run';
-const HELIDON_LAUNCH_CONFIGURATION_NAME = 'Launch Helidon Application';
+export const HELIDON_LAUNCH_CONFIGURATION_NAME = 'Launch Helidon Application';
 const HELIDON_MICROPROFILE_MAIN_CLASS = 'io.helidon.Main';
 const HELIDON_CLI_COMMAND = 'helidon';
 const HELIDON_CLI_INIT_COMMAND = 'helidon init';
@@ -35,6 +35,7 @@ interface TasksJson {
 }
 
 type HelidonBuildTool = 'maven' | 'gradle';
+type WorkspaceTarget = unknown;
 
 interface ProjectGenerationModePick extends vscode.QuickPickItem {
 	mode?: 'cli-wizard' | 'maven-archetype';
@@ -313,6 +314,80 @@ async function pickWorkspaceFolder(actionDescription: string): Promise<vscode.Wo
 	return selected ?? undefined;
 }
 
+function isWorkspaceFolderTarget(target: WorkspaceTarget): target is vscode.WorkspaceFolder {
+	return (
+		typeof target === 'object' &&
+		target !== null &&
+		'uri' in target &&
+		target.uri instanceof vscode.Uri &&
+		'name' in target &&
+		typeof target.name === 'string' &&
+		'index' in target &&
+		typeof target.index === 'number'
+	);
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null;
+}
+
+export function extractWorkspaceUriFromTarget(target: WorkspaceTarget): vscode.Uri | undefined {
+	if (target instanceof vscode.Uri) {
+		return target;
+	}
+
+	if (!isObjectRecord(target)) {
+		return undefined;
+	}
+
+	const directCandidates = [target.resourceUri, target.uri];
+	for (const candidate of directCandidates) {
+		if (candidate instanceof vscode.Uri) {
+			return candidate;
+		}
+	}
+
+	const nestedCandidates = [target.endpoint, target.group];
+	for (const candidate of nestedCandidates) {
+		if (!isObjectRecord(candidate)) {
+			continue;
+		}
+
+		const uri = candidate.uri;
+		if (uri instanceof vscode.Uri) {
+			return uri;
+		}
+	}
+
+	return undefined;
+}
+
+async function resolveWorkspaceFolder(
+	target: WorkspaceTarget | undefined,
+	actionDescription: string
+): Promise<vscode.WorkspaceFolder | undefined> {
+	if (target !== undefined) {
+		if (isWorkspaceFolderTarget(target)) {
+			return target;
+		}
+
+		const uriTarget = extractWorkspaceUriFromTarget(target);
+		if (uriTarget) {
+			const workspaceFolder = vscode.workspace.getWorkspaceFolder(uriTarget);
+			if (workspaceFolder) {
+				return workspaceFolder;
+			}
+
+			vscode.window.showWarningMessage(
+				'The selected folder is not an open VS Code workspace folder. Open it as a workspace folder to use Helidon run/debug actions from Explorer.'
+			);
+			return undefined;
+		}
+	}
+
+	return pickWorkspaceFolder(actionDescription);
+}
+
 async function pathExists(targetPath: string): Promise<boolean> {
 	try {
 		await fs.access(targetPath);
@@ -484,6 +559,20 @@ export function buildHelidonLaunchConfiguration(mainClass: string): vscode.Debug
 	};
 }
 
+export function isHelidonDebugSession(
+	session: Pick<vscode.DebugSession, 'type' | 'name' | 'configuration'>
+): boolean {
+	return (
+		session.type === 'java' &&
+		(session.name === HELIDON_LAUNCH_CONFIGURATION_NAME ||
+			session.configuration.name === HELIDON_LAUNCH_CONFIGURATION_NAME)
+	);
+}
+
+export function isHelidonTaskExecution(execution: Pick<vscode.TaskExecution, 'task'>): boolean {
+	return execution.task.name === HELIDON_RUN_TASK_LABEL || execution.task.name === HELIDON_BUILD_TASK_LABEL;
+}
+
 function hasJavaDebugExtensionInstalled(): boolean {
 	return vscode.extensions.getExtension(JAVA_DEBUG_EXTENSION_ID) !== undefined;
 }
@@ -568,13 +657,19 @@ async function ensureHelidonRunFiles(
 	return runSupport;
 }
 
-async function startHelidonProjectDebugSession(noDebug: boolean): Promise<void> {
+async function startHelidonProjectDebugSession(
+	noDebug: boolean,
+	target?: WorkspaceTarget
+): Promise<void> {
 	if (!hasJavaDebugExtensionInstalled()) {
 		await showMissingJavaDebugExtensionWarning();
 		return;
 	}
 
-	const workspaceFolder = await pickWorkspaceFolder(noDebug ? 'running the Helidon project' : 'debugging the Helidon project');
+	const workspaceFolder = await resolveWorkspaceFolder(
+		target,
+		noDebug ? 'running the Helidon project' : 'debugging the Helidon project'
+	);
 	if (!workspaceFolder) {
 		return;
 	}
@@ -612,8 +707,8 @@ export async function generateHelidonProject(): Promise<void> {
 	await generateHelidonProjectWithMavenArchetype();
 }
 
-export async function generateHelidonRunFiles(): Promise<void> {
-	const workspaceFolder = await pickWorkspaceFolder('generating VS Code run files');
+export async function generateHelidonRunFiles(target?: WorkspaceTarget): Promise<void> {
+	const workspaceFolder = await resolveWorkspaceFolder(target, 'generating VS Code run files');
 	if (!workspaceFolder) {
 		return;
 	}
@@ -627,10 +722,10 @@ export async function generateHelidonRunFiles(): Promise<void> {
 	vscode.window.showInformationMessage(`Generated VS Code run files in ${vscodeDir}`);
 }
 
-export async function runHelidonProject(): Promise<void> {
-	await startHelidonProjectDebugSession(true);
+export async function runHelidonProject(target?: WorkspaceTarget): Promise<void> {
+	await startHelidonProjectDebugSession(true, target);
 }
 
-export async function debugHelidonProject(): Promise<void> {
-	await startHelidonProjectDebugSession(false);
+export async function debugHelidonProject(target?: WorkspaceTarget): Promise<void> {
+	await startHelidonProjectDebugSession(false, target);
 }

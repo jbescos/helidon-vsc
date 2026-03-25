@@ -21,6 +21,7 @@
     "onCommand:helidon-vsc.generateRunFiles",
     "onCommand:helidon-vsc.runProject",
     "onCommand:helidon-vsc.debugProject",
+    "onCommand:helidon-vsc.stopProject",
     "onCommand:helidon-vsc.refreshEndpoints",
     "onCommand:helidon-vsc.reloadExtension"
   ],
@@ -40,15 +41,23 @@
       },
       {
         "command": "helidon-vsc.generateRunFiles",
-        "title": "Helidon: Generate Run Files"
+        "title": "Helidon: Generate Run Files",
+        "icon": "$(gear)"
       },
       {
         "command": "helidon-vsc.runProject",
-        "title": "Helidon: Run Project"
+        "title": "Helidon: Run Project",
+        "icon": "$(run)"
       },
       {
         "command": "helidon-vsc.debugProject",
-        "title": "Helidon: Debug Project"
+        "title": "Helidon: Debug Project",
+        "icon": "$(debug)"
+      },
+      {
+        "command": "helidon-vsc.stopProject",
+        "title": "Helidon: Stop Project",
+        "icon": "$(debug-stop)"
       },
       {
         "command": "helidon-vsc.refreshEndpoints",
@@ -71,9 +80,51 @@
     "menus": {
       "view/title": [
         {
+          "command": "helidon-vsc.runProject",
+          "when": "view == helidonEndpoints",
+          "group": "navigation@1"
+        },
+        {
+          "command": "helidon-vsc.debugProject",
+          "when": "view == helidonEndpoints",
+          "group": "navigation@2"
+        },
+        {
+          "command": "helidon-vsc.generateRunFiles",
+          "when": "view == helidonEndpoints",
+          "group": "navigation@3"
+        },
+        {
+          "command": "helidon-vsc.stopProject",
+          "when": "view == helidonEndpoints && helidonVsc.canStopProject",
+          "group": "navigation@4"
+        },
+        {
           "command": "helidon-vsc.refreshEndpoints",
           "when": "view == helidonEndpoints",
-          "group": "navigation"
+          "group": "navigation@5"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "helidon-vsc.runProject",
+          "when": "explorerViewletVisible && explorerResourceIsFolder && resourceScheme == file",
+          "group": "2_workspace@1"
+        },
+        {
+          "command": "helidon-vsc.debugProject",
+          "when": "explorerViewletVisible && explorerResourceIsFolder && resourceScheme == file",
+          "group": "2_workspace@2"
+        },
+        {
+          "command": "helidon-vsc.generateRunFiles",
+          "when": "explorerViewletVisible && explorerResourceIsFolder && resourceScheme == file",
+          "group": "2_workspace@3"
+        },
+        {
+          "command": "helidon-vsc.stopProject",
+          "when": "explorerViewletVisible && explorerResourceIsFolder && resourceScheme == file && helidonVsc.canStopProject",
+          "group": "2_workspace@4"
         }
       ]
     }
