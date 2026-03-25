@@ -17,7 +17,6 @@
     "onLanguage:yaml",
     "onView:helidonEndpoints",
     "onCommand:helidon-vsc.generateProject",
-    "onCommand:helidon-vsc.generateProjectCliWizard",
     "onCommand:helidon-vsc.runProject",
     "onCommand:helidon-vsc.debugProject",
     "onCommand:helidon-vsc.stopProject"
@@ -30,11 +29,8 @@
     "commands": [
       {
         "command": "helidon-vsc.generateProject",
-        "title": "Helidon: Generate Project"
-      },
-      {
-        "command": "helidon-vsc.generateProjectCliWizard",
-        "title": "Helidon: Generate Project with CLI Wizard"
+        "title": "Helidon: Generate Project",
+        "icon": "$(new-folder)"
       },
       {
         "command": "helidon-vsc.runProject",
@@ -56,26 +52,31 @@
       "explorer": [
         {
           "id": "helidonEndpoints",
-          "name": "Helidon Endpoints"
+          "name": "Helidon"
         }
       ]
     },
     "menus": {
       "view/title": [
         {
-          "command": "helidon-vsc.runProject",
+          "command": "helidon-vsc.generateProject",
           "when": "view == helidonEndpoints",
           "group": "navigation@1"
         },
         {
-          "command": "helidon-vsc.debugProject",
+          "command": "helidon-vsc.runProject",
           "when": "view == helidonEndpoints",
           "group": "navigation@2"
         },
         {
+          "command": "helidon-vsc.debugProject",
+          "when": "view == helidonEndpoints",
+          "group": "navigation@3"
+        },
+        {
           "command": "helidon-vsc.stopProject",
           "when": "view == helidonEndpoints && helidonVsc.canStopProject",
-          "group": "navigation@3"
+          "group": "navigation@4"
         }
       ],
       "explorer/context": [

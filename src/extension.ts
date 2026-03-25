@@ -16,7 +16,6 @@ import {
 	debugHelidonProject,
 	extractWorkspaceUriFromTarget,
 	generateHelidonProject,
-	generateHelidonProjectWithCliWizard,
 	isHelidonDebugSession,
 	isHelidonTaskExecution,
 	runHelidonProject,
@@ -157,13 +156,6 @@ export function activate(context: vscode.ExtensionContext) {
 	const generateProjectCommand = vscode.commands.registerCommand('helidon-vsc.generateProject', async () => {
 		await generateHelidonProject();
 	});
-
-	const generateProjectCliWizardCommand = vscode.commands.registerCommand(
-		'helidon-vsc.generateProjectCliWizard',
-		async () => {
-			await generateHelidonProjectWithCliWizard();
-		}
-	);
 
 	const runProjectCommand = vscode.commands.registerCommand(
 		'helidon-vsc.runProject',
@@ -501,7 +493,6 @@ export function activate(context: vscode.ExtensionContext) {
 		pathParameterDefinitionProvider,
 		codeActionProvider,
 		generateProjectCommand,
-		generateProjectCliWizardCommand,
 		runProjectCommand,
 		debugProjectCommand,
 		stopProjectCommand,

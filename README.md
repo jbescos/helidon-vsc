@@ -30,7 +30,7 @@ Current feature set:
 - Helidon project generation via the Helidon CLI wizard when `helidon` is installed
 - Built-in Helidon Maven archetype project generation fallback
 - `Helidon: Run Project`, `Helidon: Debug Project`, and `Helidon: Stop Project` for a basic Helidon run/debug lifecycle
-- always-visible status bar buttons for Run and Debug, plus a Stop button while a Helidon session/task is active; toolbar buttons for Run, Debug, and Stop in the `Helidon Endpoints` view; and Explorer folder context-menu actions for Run, Debug, and Stop
+- always-visible status bar buttons for Run and Debug, plus a Stop button while a Helidon session/task is active; toolbar buttons for Create Project, Run, Debug, and Stop in the `Helidon` view; and Explorer folder context-menu actions for Run, Debug, and Stop
 - automatic endpoint view refresh on Java edits and workspace file changes
 
 When editing an `application.properties` or `microprofile-config.properties` file, typing prefixes like `server.` will offer Helidon configuration keys such as:
@@ -89,7 +89,7 @@ Duplicate `.properties` key diagnostics are intentionally limited to Helidon roo
 
 ## Endpoint discovery
 
-The extension now contributes a **Helidon Endpoints** view in the Explorer.
+The extension now contributes a **Helidon** view in the Explorer.
 
 Current endpoint support:
 
@@ -125,8 +125,6 @@ Current behavior:
   - **Helidon CLI Wizard** for richer archetype and feature selection using `helidon init`
   - **Maven Archetype Generator** as a built-in fallback
 - if `helidon` is not available on `PATH`, the picker keeps the Helidon CLI option visible but disabled and explains that the CLI was not found on `PATH`
-
-The extension also includes **Helidon: Generate Project with CLI Wizard**.
 
 Current CLI wizard behavior:
 
@@ -164,9 +162,9 @@ Current behavior:
 - `Helidon: Debug Project` starts the Java debugger
 - `Helidon: Stop Project` stops matching Helidon Java launch sessions and falls back to terminating Helidon tasks when needed
 - status bar shortcuts expose always-visible Run and Debug actions when a workspace folder is open, and a Stop action while a Helidon session/task is active
-- the `Helidon Endpoints` view title exposes button shortcuts for Run, Debug, and Stop
+- the `Helidon` view title exposes button shortcuts for Create Project, Run, Debug, and Stop
 - Explorer folder context menus expose Run, Debug, and Stop for open workspace folders
-- the `Helidon Endpoints` view refreshes automatically on Java edits and workspace file changes
+- the `Helidon` view refreshes automatically on Java edits and workspace file changes
 - reuses existing `.vscode` files instead of replacing unrelated entries
 
 ## Requirements

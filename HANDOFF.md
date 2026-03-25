@@ -136,7 +136,6 @@ Implemented a first project generation feature using Helidon archetypes.
 
 Command:
 - `Helidon: Generate Project`
-- `Helidon: Generate Project with CLI Wizard`
 
 Current behavior:
 - `Helidon: Generate Project`
@@ -144,10 +143,6 @@ Current behavior:
     - `Helidon CLI Wizard`
     - `Maven Archetype Generator`
   - if `helidon` CLI is not available on `PATH`, keeps the CLI option visible but disabled and explains why
-- `Helidon: Generate Project with CLI Wizard`
-  - prompts for target folder
-  - launches `helidon init` in an integrated terminal
-  - uses the Helidon CLI for richer archetype/feature selection during setup
 - built-in Maven fallback:
   - prompts for target folder
   - prompts for groupId
@@ -270,7 +265,7 @@ Important scope note:
 
 ### 14. First endpoint discovery/display/navigation pass
 Implemented an initial endpoint feature set in the VS Code extension:
-- Explorer view: `Helidon Endpoints`
+- Explorer view for Helidon endpoints
 - source-based discovery of JAX-RS resources in workspace Java files
 - class-level and method-level `@Path` path composition
 - HTTP method detection for `@GET`, `@POST`, `@PUT`, `@DELETE`, `@PATCH`, `@HEAD`, and `@OPTIONS`
@@ -373,7 +368,7 @@ Implemented the first actual run/debug workflow on top of the earlier scaffold g
 - UI entry points added:
   - always-visible status bar buttons for Run and Debug when a workspace folder is open
   - status bar Stop button while a Helidon session/task is active
-  - toolbar buttons in the `Helidon Endpoints` view title for Run, Debug, and Stop
+  - toolbar buttons in the Explorer view title for Run, Debug, and Stop
   - Explorer folder context-menu actions for Run, Debug, and Stop
   - Explorer-triggered actions resolve the selected folder back to its open workspace folder before launch
   - view-title actions were hardened to accept tree-view payloads such as selected endpoint/group items
@@ -425,6 +420,17 @@ Implemented duplicate-key diagnostics for Helidon `.properties` files:
 Important scope note:
 - this pass adds diagnostics only; there is still no quick fix to remove duplicate `.properties` entries
 - duplicate detection is per file, not cross-file/profile aware
+
+### 24. Helidon view UX cleanup
+Adjusted the Explorer view UX so it better matches the growing command set:
+- renamed the Explorer view title from `Helidon Endpoints` to `Helidon`
+- added `Helidon: Generate Project` to the view-title toolbar
+- removed the separate `Helidon: Generate Project with CLI Wizard` command entry from the manifest and command palette
+- project generation still exposes both paths from the single `Helidon: Generate Project` entry point
+
+Important scope note:
+- the underlying CLI wizard path still exists as a generation mode inside `Helidon: Generate Project`
+- the tree content is still endpoint-oriented; this pass only broadens the visible view framing and actions
 
 ---
 
@@ -767,7 +773,7 @@ Also defer competitor benchmarking until the Helidon extension is in a more comp
 - [x] runtime debug output channel
 - [x] example/demo project
 - [x] Helidon project generation command using expanded built-in Maven archetypes
-- [x] Helidon CLI project-generation wizard launcher for richer archetype/feature selection during setup
+- [x] Helidon CLI project-generation path inside `Helidon: Generate Project` for richer archetype/feature selection during setup
 - [x] automatic `.vscode/launch.json` / `.vscode/tasks.json` generation for run/debug
 - [x] `Helidon: Run Project` helper command
 - [x] `Helidon: Debug Project` helper command
@@ -856,7 +862,7 @@ If inspections are tackled, be conservative because missing classpath metadata c
    - duplicate YAML key quick fix
    - Java `Config.get("server.port")` completion / hover / navigation / invalid-key diagnostics
    - Java `Config.get("server.prt")` quick fix
-   - Explorer view → `Helidon Endpoints`
+   - Explorer view → `Helidon`
    - click an endpoint entry and confirm it opens the Java method
    - verify routing/service endpoints, not only JAX-RS endpoints
    - verify Java endpoint code lenses appear and open the corresponding method
