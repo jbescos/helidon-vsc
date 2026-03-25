@@ -13,6 +13,9 @@ const JAVA_ENDPOINT_GLOB = '**/*.java';
 const JAVA_ENDPOINT_EXCLUDE_GLOB = '**/{.git,.gradle,.idea,node_modules,target}/**';
 const HTTP_METHOD_ANNOTATIONS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'] as const;
 const ROUTING_HTTP_METHODS = ['get', 'post', 'put', 'delete', 'patch', 'head', 'options', 'trace'] as const;
+const JAVA_EXECUTE_WORKSPACE_COMMAND = 'java.execute.workspaceCommand';
+export const HELIDON_ENDPOINT_DISCOVERY_COMMAND = 'io.helidon.vscode.resolveEndpoints';
+const HELIDON_ENDPOINT_DISCOVERY_REQUEST_VERSION = 1;
 
 export interface HelidonEndpoint {
 	className: string;
@@ -30,6 +33,47 @@ interface HelidonEndpointGroup {
 	uri: vscode.Uri;
 	line: number;
 	endpoints: HelidonEndpoint[];
+}
+
+type HelidonEndpointDiscoverySource = 'semantic' | 'source-parser';
+
+export interface HelidonEndpointDiscoveryLogger {
+	appendLine(message: string): void;
+}
+
+export interface HelidonEndpointDiscoveryResult {
+	source: HelidonEndpointDiscoverySource;
+	groups: HelidonEndpointGroup[];
+	message: string;
+}
+
+export interface HelidonEndpointDiscoveryOptions {
+	workspaceFolders?: readonly Pick<vscode.WorkspaceFolder, 'uri'>[];
+	commandExecutor?: (command: string, requestJson: string) => Thenable<unknown>;
+	fallbackProvider?: () => Promise<HelidonEndpointGroup[]>;
+}
+
+interface HelidonEndpointGroupDto {
+	className: string;
+	relativePath: string;
+	uri: string;
+	line: number;
+	endpoints: HelidonEndpointDto[];
+}
+
+interface HelidonEndpointDto {
+	className: string;
+	methodName: string;
+	httpMethod: string;
+	path: string;
+	relativePath: string;
+	uri: string;
+	line: number;
+}
+
+interface HelidonSemanticEndpointResponseDto {
+	supported?: boolean;
+	groups?: HelidonEndpointGroupDto[];
 }
 
 interface ParsedRouteDefinition {
@@ -384,6 +428,203 @@ function addEndpoint(groups: Map<string, HelidonEndpointGroup>, endpoint: Helido
 	});
 }
 
+function sortEndpointGroups(groups: readonly HelidonEndpointGroup[]): HelidonEndpointGroup[] {
+	return [...groups]
+		.map((group) => ({
+			...group,
+			endpoints: [...group.endpoints].sort((left, right) =>
+				left.path === right.path
+					? left.httpMethod.localeCompare(right.httpMethod)
+					: left.path.localeCompare(right.path)
+			),
+		}))
+		.sort((left, right) =>
+			left.className === right.className
+				? left.relativePath.localeCompare(right.relativePath)
+				: left.className.localeCompare(right.className)
+		);
+}
+
+function countEndpoints(groups: readonly HelidonEndpointGroup[]): number {
+	return groups.reduce((count, group) => count + group.endpoints.length, 0);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+	return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+function deserializeEndpoint(value: unknown): HelidonEndpoint | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+
+	if (
+		typeof value.className !== 'string' ||
+		typeof value.methodName !== 'string' ||
+		typeof value.httpMethod !== 'string' ||
+		typeof value.path !== 'string' ||
+		typeof value.relativePath !== 'string' ||
+		typeof value.uri !== 'string' ||
+		!isNonNegativeInteger(value.line)
+	) {
+		return undefined;
+	}
+
+	try {
+		return {
+			className: value.className,
+			methodName: value.methodName,
+			httpMethod: value.httpMethod,
+			path: value.path,
+			relativePath: value.relativePath,
+			uri: vscode.Uri.parse(value.uri),
+			line: value.line,
+		};
+	} catch {
+		return undefined;
+	}
+}
+
+function deserializeEndpointGroup(value: unknown): HelidonEndpointGroup | undefined {
+	if (!isRecord(value)) {
+		return undefined;
+	}
+
+	if (
+		typeof value.className !== 'string' ||
+		typeof value.relativePath !== 'string' ||
+		typeof value.uri !== 'string' ||
+		!isNonNegativeInteger(value.line) ||
+		!Array.isArray(value.endpoints)
+	) {
+		return undefined;
+	}
+
+	const endpoints = value.endpoints.map(deserializeEndpoint);
+	if (endpoints.some((endpoint) => endpoint === undefined)) {
+		return undefined;
+	}
+
+	try {
+		return {
+			className: value.className,
+			relativePath: value.relativePath,
+			uri: vscode.Uri.parse(value.uri),
+			line: value.line,
+			endpoints: endpoints as HelidonEndpoint[],
+		};
+	} catch {
+		return undefined;
+	}
+}
+
+function normalizeSemanticEndpointResponse(
+	value: unknown,
+): { supported: boolean; groups: HelidonEndpointGroup[] } | undefined {
+	if (Array.isArray(value)) {
+		const groups = value.map(deserializeEndpointGroup);
+		return groups.every((group) => group !== undefined)
+			? { supported: true, groups: sortEndpointGroups(groups as HelidonEndpointGroup[]) }
+			: undefined;
+	}
+
+	if (!isRecord(value)) {
+		return undefined;
+	}
+
+	const response = value as HelidonSemanticEndpointResponseDto;
+	if (response.supported === false) {
+		return { supported: false, groups: [] };
+	}
+
+	if (response.supported !== true || !Array.isArray(response.groups)) {
+		return undefined;
+	}
+
+	const groups = response.groups.map(deserializeEndpointGroup);
+	return groups.every((group) => group !== undefined)
+		? { supported: true, groups: sortEndpointGroups(groups as HelidonEndpointGroup[]) }
+		: undefined;
+}
+
+function semanticEndpointDiscoveryRequestJson(workspaceFolders: readonly Pick<vscode.WorkspaceFolder, 'uri'>[]): string {
+	return JSON.stringify({
+		version: HELIDON_ENDPOINT_DISCOVERY_REQUEST_VERSION,
+		workspaceFolderUris: workspaceFolders.map((folder) => folder.uri.toString()),
+	});
+}
+
+function defaultEndpointCommandExecutor(command: string, requestJson: string): Thenable<unknown> {
+	return vscode.commands.executeCommand(JAVA_EXECUTE_WORKSPACE_COMMAND, command, requestJson);
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+export async function discoverHelidonEndpointGroups(
+	options: HelidonEndpointDiscoveryOptions = {},
+): Promise<HelidonEndpointDiscoveryResult> {
+	const workspaceFolders = options.workspaceFolders ?? vscode.workspace.workspaceFolders ?? [];
+	const commandExecutor = options.commandExecutor ?? defaultEndpointCommandExecutor;
+	const fallbackProvider = options.fallbackProvider ?? scanWorkspaceEndpoints;
+
+	if (workspaceFolders.length > 0) {
+		try {
+			const rawResponse = await commandExecutor(
+				HELIDON_ENDPOINT_DISCOVERY_COMMAND,
+				semanticEndpointDiscoveryRequestJson(workspaceFolders)
+			);
+			const response = normalizeSemanticEndpointResponse(rawResponse);
+			if (response?.supported) {
+				return {
+					source: 'semantic',
+					groups: response.groups,
+					message: `Helidon endpoint discovery is using Java semantic support (${countEndpoints(response.groups)} endpoint(s)).`,
+				};
+			}
+
+			if (response?.supported === false) {
+				const groups = sortEndpointGroups(await fallbackProvider());
+				return {
+					source: 'source-parser',
+					groups,
+					message:
+						'Helidon endpoint discovery semantic provider reported unsupported; using source parsing fallback.',
+				};
+			}
+
+			if (rawResponse !== undefined && rawResponse !== null) {
+				const groups = sortEndpointGroups(await fallbackProvider());
+				return {
+					source: 'source-parser',
+					groups,
+					message:
+						'Helidon endpoint discovery semantic provider returned an unexpected payload; using source parsing fallback.',
+				};
+			}
+		} catch (error) {
+			const groups = sortEndpointGroups(await fallbackProvider());
+			return {
+				source: 'source-parser',
+				groups,
+				message: `Helidon endpoint discovery semantic provider is unavailable (${errorMessage(error)}); using source parsing fallback.`,
+			};
+		}
+	}
+
+	const groups = sortEndpointGroups(await fallbackProvider());
+	return {
+		source: 'source-parser',
+		groups,
+		message: `Helidon endpoint discovery is using source parsing fallback (${countEndpoints(groups)} endpoint(s)).`,
+	};
+}
+
 abstract class HelidonEndpointTreeItem extends vscode.TreeItem {
 	abstract readonly key: string;
 }
@@ -431,6 +672,13 @@ export class HelidonEndpointsTreeDataProvider
 	readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
 
 	private cachedGroups: HelidonEndpointGroup[] | undefined;
+	private lastDiscoveryMessage: string | undefined;
+
+	constructor(
+		private readonly discoveryOptions: HelidonEndpointDiscoveryOptions & {
+			logger?: HelidonEndpointDiscoveryLogger;
+		} = {},
+	) {}
 
 	refresh(): void {
 		this.cachedGroups = undefined;
@@ -466,7 +714,12 @@ export class HelidonEndpointsTreeDataProvider
 
 	private async loadGroups(): Promise<HelidonEndpointGroup[]> {
 		if (!this.cachedGroups) {
-			this.cachedGroups = await scanWorkspaceEndpoints();
+			const discovery = await discoverHelidonEndpointGroups(this.discoveryOptions);
+			this.cachedGroups = discovery.groups;
+			if (this.discoveryOptions.logger && discovery.message !== this.lastDiscoveryMessage) {
+				this.discoveryOptions.logger.appendLine(discovery.message);
+				this.lastDiscoveryMessage = discovery.message;
+			}
 		}
 
 		return this.cachedGroups;

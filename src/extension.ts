@@ -106,7 +106,7 @@ export function activate(context: vscode.ExtensionContext) {
 	stopStatusBarItem.tooltip = 'Stop the current Helidon project';
 	stopStatusBarItem.command = 'helidon-vsc.stopProject';
 	const diagnostics = vscode.languages.createDiagnosticCollection('helidon-vsc');
-	const endpointsProvider = new HelidonEndpointsTreeDataProvider();
+	const endpointsProvider = new HelidonEndpointsTreeDataProvider({ logger: output });
 	const endpointsView = vscode.window.createTreeView('helidonEndpoints', {
 		treeDataProvider: endpointsProvider,
 		showCollapseAll: true,
@@ -308,8 +308,7 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		const endpointCount = await endpointsProvider.endpointCount();
-		endpointsView.message =
-			endpointCount === 0 ? 'No Helidon endpoints found in workspace Java sources.' : undefined;
+		endpointsView.message = endpointCount === 0 ? 'No Helidon endpoints found in the current workspace.' : undefined;
 	};
 
 	const updateStatusBarItems = () => {

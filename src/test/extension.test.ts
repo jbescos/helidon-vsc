@@ -7,7 +7,12 @@ import JSZip = require('jszip');
 // You can import and use all API from the 'vscode' module
 // as well as import your extension to test it
 import * as vscode from 'vscode';
-import { parseJavaHelidonRoutingEndpoints, parseJavaJaxRsEndpoints } from '../endpoints';
+import {
+	discoverHelidonEndpointGroups,
+	HELIDON_ENDPOINT_DISCOVERY_COMMAND,
+	parseJavaHelidonRoutingEndpoints,
+	parseJavaJaxRsEndpoints,
+} from '../endpoints';
 import {
 	buildHelidonPropertiesDocumentSelectors,
 	isMicroProfileManagedHelidonPropertiesFile,
@@ -386,6 +391,122 @@ suite('Extension Test Suite', () => {
 			[
 				{ className: 'GreetService', methodName: 'updateGreetingHandler', httpMethod: 'PUT', path: '/greeting' },
 			]
+		);
+	});
+
+	test('endpoint discovery prefers semantic Java results when available', async () => {
+		const workspaceUri = vscode.Uri.file('/tmp/helidon-semantic-workspace');
+		const endpointUri = vscode.Uri.file('/tmp/helidon-semantic-workspace/src/main/java/GreetResource.java');
+		let fallbackInvoked = false;
+
+		const result = await discoverHelidonEndpointGroups({
+			workspaceFolders: [{ uri: workspaceUri }],
+			commandExecutor: async (command, requestJson) => {
+				assert.strictEqual(command, HELIDON_ENDPOINT_DISCOVERY_COMMAND);
+				assert.deepStrictEqual(JSON.parse(requestJson), {
+					version: 1,
+					workspaceFolderUris: [workspaceUri.toString()],
+				});
+				return {
+					supported: true,
+					groups: [
+						{
+							className: 'GreetResource',
+							relativePath: 'src/main/java/GreetResource.java',
+							uri: endpointUri.toString(),
+							line: 7,
+							endpoints: [
+								{
+									className: 'GreetResource',
+									methodName: 'getMessage',
+									httpMethod: 'GET',
+									path: '/greet/{name}',
+									relativePath: 'src/main/java/GreetResource.java',
+									uri: endpointUri.toString(),
+									line: 7,
+								},
+							],
+						},
+					],
+				};
+			},
+			fallbackProvider: async () => {
+				fallbackInvoked = true;
+				return [];
+			},
+		});
+
+		assert.strictEqual(result.source, 'semantic');
+		assert.strictEqual(fallbackInvoked, false);
+		assert.strictEqual(result.groups.length, 1);
+		assert.strictEqual(result.groups[0].className, 'GreetResource');
+		assert.strictEqual(result.groups[0].endpoints[0].path, '/greet/{name}');
+		assert.strictEqual(result.message, 'Helidon endpoint discovery is using Java semantic support (1 endpoint(s)).');
+	});
+
+	test('endpoint discovery falls back when semantic Java support reports unsupported', async () => {
+		const fallbackUri = vscode.Uri.file('/tmp/helidon-fallback-workspace/src/main/java/GreetService.java');
+		let fallbackInvocations = 0;
+
+		const result = await discoverHelidonEndpointGroups({
+			workspaceFolders: [{ uri: vscode.Uri.file('/tmp/helidon-fallback-workspace') }],
+			commandExecutor: async () => ({ supported: false }),
+			fallbackProvider: async () => {
+				fallbackInvocations += 1;
+				return [
+					{
+						className: 'GreetService',
+						relativePath: 'src/main/java/GreetService.java',
+						uri: fallbackUri,
+						line: 4,
+						endpoints: [
+							{
+								className: 'GreetService',
+								methodName: 'getDefaultMessageHandler',
+								httpMethod: 'GET',
+								path: '/',
+								relativePath: 'src/main/java/GreetService.java',
+								uri: fallbackUri,
+								line: 6,
+							},
+						],
+					},
+				];
+			},
+		});
+
+		assert.strictEqual(result.source, 'source-parser');
+		assert.strictEqual(fallbackInvocations, 1);
+		assert.strictEqual(result.groups.length, 1);
+		assert.strictEqual(result.groups[0].endpoints[0].methodName, 'getDefaultMessageHandler');
+		assert.strictEqual(
+			result.message,
+			'Helidon endpoint discovery semantic provider reported unsupported; using source parsing fallback.'
+		);
+	});
+
+	test('endpoint discovery falls back when semantic Java payload is invalid', async () => {
+		const fallbackUri = vscode.Uri.file('/tmp/helidon-invalid-workspace/src/main/java/GreetService.java');
+
+		const result = await discoverHelidonEndpointGroups({
+			workspaceFolders: [{ uri: vscode.Uri.file('/tmp/helidon-invalid-workspace') }],
+			commandExecutor: async () => ({ supported: true, groups: [{ className: 'BrokenGroup' }] }),
+			fallbackProvider: async () => [
+				{
+					className: 'GreetService',
+					relativePath: 'src/main/java/GreetService.java',
+					uri: fallbackUri,
+					line: 1,
+					endpoints: [],
+				},
+			],
+		});
+
+		assert.strictEqual(result.source, 'source-parser');
+		assert.strictEqual(result.groups.length, 1);
+		assert.strictEqual(
+			result.message,
+			'Helidon endpoint discovery semantic provider returned an unexpected payload; using source parsing fallback.'
 		);
 	});
 
