@@ -229,8 +229,8 @@ suite('Extension Test Suite', () => {
 		assert.deepStrictEqual(parseHelidonConfigMetadata('{'), []);
 	});
 
-	test('JAX-RS endpoint parser discovers class and method paths', () => {
-		const endpoints = parseJavaJaxRsEndpoints(`
+	test('JAX-RS endpoint parser discovers class and method paths', async () => {
+		const endpoints = await parseJavaJaxRsEndpoints(`
 			import jakarta.ws.rs.GET;
 			import jakarta.ws.rs.PUT;
 			import jakarta.ws.rs.Path;
@@ -271,8 +271,36 @@ suite('Extension Test Suite', () => {
 		);
 	});
 
-	test('JAX-RS endpoint parser ignores non-endpoint Java methods', () => {
-		const endpoints = parseJavaJaxRsEndpoints(`
+	test('JAX-RS endpoint parser reads @Path annotation values from named arguments', async () => {
+		const endpoints = await parseJavaJaxRsEndpoints(`
+			import jakarta.ws.rs.GET;
+			import jakarta.ws.rs.Path;
+
+			@Path(value = "/greet")
+			public class GreetResource {
+			    @Path(value = "/{name}")
+			    @GET
+			    public Message getMessage(String name) {
+			        return null;
+			    }
+			}
+		`);
+
+		assert.deepStrictEqual(
+			endpoints.map((endpoint) => ({
+				className: endpoint.className,
+				methodName: endpoint.methodName,
+				httpMethod: endpoint.httpMethod,
+				path: endpoint.path,
+			})),
+			[
+				{ className: 'GreetResource', methodName: 'getMessage', httpMethod: 'GET', path: '/greet/{name}' },
+			]
+		);
+	});
+
+	test('JAX-RS endpoint parser ignores non-endpoint Java methods', async () => {
+		const endpoints = await parseJavaJaxRsEndpoints(`
 			public class PlainService {
 			    public String greet() {
 			        return "hi";
@@ -283,8 +311,8 @@ suite('Extension Test Suite', () => {
 		assert.deepStrictEqual(endpoints, []);
 	});
 
-	test('Helidon routing parser discovers service-style route methods', () => {
-		const endpoints = parseJavaHelidonRoutingEndpoints(`
+	test('Helidon routing parser discovers service-style route methods', async () => {
+		const endpoints = await parseJavaHelidonRoutingEndpoints(`
 			public class GreetService {
 			    void update(Routing.Rules rules) {
 			        rules.get("/", this::getDefaultMessageHandler)
@@ -313,6 +341,32 @@ suite('Extension Test Suite', () => {
 			[
 				{ className: 'GreetService', methodName: 'getDefaultMessageHandler', httpMethod: 'GET', path: '/' },
 				{ className: 'GreetService', methodName: 'getMessageHandler', httpMethod: 'GET', path: '/{name}' },
+				{ className: 'GreetService', methodName: 'updateGreetingHandler', httpMethod: 'PUT', path: '/greeting' },
+			]
+		);
+	});
+
+	test('Helidon routing parser resolves local string values for route paths', async () => {
+		const endpoints = await parseJavaHelidonRoutingEndpoints(`
+			public class GreetService {
+			    void update(Routing.Rules rules) {
+			        String greetingPath = "/greeting";
+			        rules.put(greetingPath, this::updateGreetingHandler);
+			    }
+
+			    void updateGreetingHandler(ServerRequest req, ServerResponse res) {
+			    }
+			}
+		`);
+
+		assert.deepStrictEqual(
+			endpoints.map((endpoint) => ({
+				className: endpoint.className,
+				methodName: endpoint.methodName,
+				httpMethod: endpoint.httpMethod,
+				path: endpoint.path,
+			})),
+			[
 				{ className: 'GreetService', methodName: 'updateGreetingHandler', httpMethod: 'PUT', path: '/greeting' },
 			]
 		);

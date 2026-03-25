@@ -78,6 +78,7 @@
     "test": "vscode-test --config .vscode-test.mjs"
   },
   "dependencies": {
+    "java-parser": "^3.0.1",
     "jszip": "^3.10.1"
   },
   "devDependencies": {

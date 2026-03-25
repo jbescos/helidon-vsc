@@ -326,8 +326,13 @@ Implemented the first substantial parity move beyond JAX-RS-only endpoint suppor
   - `.vscode/launch.json`
 
 Important scope note:
-- routing discovery is still source-based and conservative
-- service registration resolution is strongest when the code uses direct `new SomeService(...)` patterns
+- routing discovery is still conservative, but it no longer relies on hand-written regex parsing
+- endpoint/path-parameter extraction now uses the third-party `java-parser` CST library
+- this improved support for cases such as:
+  - `@Path(value = "/...")`
+  - local string bindings used as route paths
+  - local/field `new SomeService(...)` bindings later passed to `register(...)`
+- `redhat.java` is still useful for project/classpath integration, but it does not currently provide a public endpoint/AST API that this feature can build on directly
 - the run/bootstrap helper is the VS Code analogue of the IntelliJ run configuration bootstrap, not a full project wizard replacement
 
 ---

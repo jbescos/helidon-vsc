@@ -94,7 +94,8 @@ Current endpoint support:
 
 Current limitations:
 
-- endpoint discovery is still source-based rather than semantic
+- endpoint discovery uses the bundled `java-parser` CST library rather than a semantic Java model
+- endpoint discovery no longer relies on hand-written regex parsing, but it is still not backed by a full Java symbol/AST API from `redhat.java`
 - service registration resolution is conservative and currently strongest when services are registered via `new ServiceType(...)`
 - endpoint inlay hints are represented as VS Code code lenses rather than IntelliJ-style inline hints
 
@@ -133,9 +134,17 @@ Current behavior:
 
 ## Requirements
 
-- Visual Studio Code
-- Extension Pack for Java
-- Open the Helidon project as a Java workspace in VS Code
+Runtime requirements:
+
+- Visual Studio Code 1.110 or newer
+- `Language Support for Java(TM) by Red Hat` (`redhat.java`)
+- Open the Helidon project as a Java workspace in VS Code and let the Java extension finish project/classpath initialization
+
+Notes:
+
+- Installing `Extension Pack for Java` is also fine; it includes `redhat.java`
+- This extension declares `redhat.java` as an extension dependency because Helidon metadata loading relies on its Java project/classpath API
+- No separate `java-parser` installation is required by users; `java-parser` is bundled as an internal dependency used for endpoint and path-parameter parsing
 
 ## Extension Settings
 
