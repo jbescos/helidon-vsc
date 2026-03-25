@@ -1,5 +1,10 @@
-import helidonConfigMetadata from './metadata/helidon-config-metadata.json';
-import type { HelidonConfigProperty } from './helidonConfig';
+export interface HelidonConfigProperty {
+	key: string;
+	type: string;
+	defaultValue?: string;
+	description: string;
+	example?: string;
+}
 
 interface HelidonMetadataModule {
 	module: string;
@@ -24,11 +29,9 @@ interface HelidonMetadataOption {
 	defaultValue?: string;
 }
 
-const metadataModules = helidonConfigMetadata as HelidonMetadataModule[];
-const metadataTypes = new Map(metadataModules.flatMap((module) => module.types.map((type) => [type.type, type] as const)));
-
 function flattenType(
 	metadataType: HelidonMetadataType,
+	metadataTypes: ReadonlyMap<string, HelidonMetadataType>,
 	prefix: string,
 	visited: Set<string>,
 ): HelidonConfigProperty[] {
@@ -55,15 +58,42 @@ function flattenType(
 			continue;
 		}
 
-		properties.push(...flattenType(nestedType, key, new Set(visited)));
+		properties.push(...flattenType(nestedType, metadataTypes, key, new Set(visited)));
 	}
 
 	return properties;
 }
 
-export function loadHelidonConfigMetadata(): HelidonConfigProperty[] {
-	return metadataModules
+function flattenMetadataModules(modules: readonly HelidonMetadataModule[]): HelidonConfigProperty[] {
+	const metadataTypes = new Map(modules.flatMap((module) => module.types.map((type) => [type.type, type] as const)));
+	return modules
 		.flatMap((module) => module.types)
 		.filter((type) => type.standalone && type.prefix.length > 0)
-		.flatMap((type) => flattenType(type, type.prefix, new Set<string>()));
+		.flatMap((type) => flattenType(type, metadataTypes, type.prefix, new Set<string>()));
+}
+
+export function parseHelidonConfigMetadata(jsonText: string): HelidonConfigProperty[] {
+	try {
+		const modules = JSON.parse(jsonText) as HelidonMetadataModule[];
+		if (!Array.isArray(modules)) {
+			return [];
+		}
+
+		return flattenMetadataModules(modules);
+	} catch {
+		return [];
+	}
+}
+
+export function mergeHelidonConfigMetadata(
+	...metadataSources: ReadonlyArray<readonly HelidonConfigProperty[]>
+): HelidonConfigProperty[] {
+	const merged = new Map<string, HelidonConfigProperty>();
+	for (const source of metadataSources) {
+		for (const property of source) {
+			merged.set(property.key, property);
+		}
+	}
+
+	return [...merged.values()];
 }

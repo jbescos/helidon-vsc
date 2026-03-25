@@ -94,6 +94,7 @@ We explored comparable tooling and references:
 ### 2. Config support MVP in VS Code extension
 Implemented in `helidon-vsc`:
 - completion for `application.properties`
+- completion for `microprofile-config.properties`
 - hover for known properties
 - completion for `application.yaml` / `application.yml`
 - hover for known YAML keys
@@ -104,10 +105,12 @@ Implemented and refactored:
 - moved metadata to external files
 - then aligned the metadata structure toward the IntelliJ/Helidon-style structured shape
 - parser/flattening logic converts structured metadata into flat keys for current VS Code providers
+- replaced bundled metadata fallback with runtime metadata loaded from Java classpaths via the `redhat.java` extension API
+- reads `META-INF/helidon/config-metadata.json` from resolved directories and JARs
 
-Current metadata files:
-- `src/metadata/helidon-config-metadata.json`
+Current metadata/runtime files:
 - `src/metadata.ts`
+- `src/javaMetadata.ts`
 
 ### 4. Example/demo project
 Created a dummy project for manual testing:
@@ -145,6 +148,21 @@ Supported archetypes currently:
 - removed `src/legacyIntegrationNotes.ts`
 - ensured local absolute-path notes are not part of runtime extension code
 
+### 7. Java extension integration
+Implemented option A from the design discussion:
+- uses `Language Support for Java(TM) by Red Hat` (`redhat.java`) as the runtime source of project classpaths
+- reads Helidon metadata from dependency JARs and exploded output directories
+- shows a warning when Java support is missing or when Helidon metadata is unavailable on the current classpath
+
+Important nuance:
+- this is not a custom Java LS plugin
+- it consumes the public `redhat.java` extension API from TypeScript
+
+### 8. File-scope fixes discovered during manual testing
+Manual testing found two important cases:
+- generated MP projects use `META-INF/microprofile-config.properties`, which is now supported
+- generated `app.yaml` files from MP archetypes are Kubernetes manifests, not Helidon config files, so support for `app.yaml` / `app.properties` was intentionally reverted
+
 ---
 
 ## Commits created so far
@@ -177,10 +195,10 @@ This influenced the current metadata refactor in our VS Code extension.
 
 ## What is intentionally NOT the focus right now
 Per latest decision with the user:
-- **Do not focus now on integrating with the same language server as `redhat.java`**
-- treat that as a future/last refactoring step
+- keep using the simple `redhat.java` API integration path
+- do **not** pivot to a custom Java language-server plugin unless explicitly requested
 
-So for the next conversation, do **not** center the work around JDT LS integration unless explicitly requested again.
+So for the next conversation, do **not** center the work around a deeper JDT LS plugin integration unless explicitly requested again.
 
 ---
 
@@ -188,11 +206,13 @@ So for the next conversation, do **not** center the work around JDT LS integrati
 
 ### Implemented
 - [x] `application.properties` completion
+- [x] `microprofile-config.properties` completion
 - [x] `application.properties` hover
+- [x] `microprofile-config.properties` hover
 - [x] `application.yaml` / `application.yml` completion
 - [x] `application.yaml` / `application.yml` hover
-- [x] external metadata file
-- [x] structured metadata model inspired by IntelliJ plugin
+- [x] structured metadata parser inspired by IntelliJ plugin
+- [x] Java classpath metadata loading via `redhat.java`
 - [x] example/demo project
 - [x] Helidon project generation command using archetypes
 
@@ -201,7 +221,7 @@ So for the next conversation, do **not** center the work around JDT LS integrati
 - [ ] endpoint discovery / display
 - [ ] richer Java-side Helidon features
 - [ ] optional `.vscode/` helper generation command
-- [ ] final refactoring toward same Java LS as `redhat.java` (deferred)
+- [ ] deeper Java LS plugin integration (deferred)
 
 ---
 
@@ -213,7 +233,7 @@ Suggested next priorities for the new conversation:
 4. Optional **“.vscode helper files”** command if desired
 5. Only later: **same Java language server integration** as a final refactor
 
-If diagnostics are tackled, be conservative because stale metadata can create false positives.
+If diagnostics are tackled, be conservative because missing classpath metadata can still create false positives or false negatives during workspace startup.
 
 ---
 
@@ -223,6 +243,7 @@ If diagnostics are tackled, be conservative because stale metadata can create fa
 3. In Extension Development Host, open `/home/jbescos/workspace/helidon-vsc-example`
 4. Test:
    - `application.properties`
+   - `src/main/resources/META-INF/microprofile-config.properties` in generated MP projects
    - `application.yaml`
    - command palette → `Helidon: Generate Project`
 
@@ -231,8 +252,8 @@ If diagnostics are tackled, be conservative because stale metadata can create fa
 ## Current important source files in `helidon-vsc`
 - `src/extension.ts`
 - `src/helidonConfig.ts`
+- `src/javaMetadata.ts`
 - `src/metadata.ts`
-- `src/metadata/helidon-config-metadata.json`
 - `src/generator.ts`
 - `src/test/extension.test.ts`
 - `README.md`

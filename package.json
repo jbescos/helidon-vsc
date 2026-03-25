@@ -43,6 +43,9 @@
     "lint": "eslint src",
     "test": "vscode-test --config .vscode-test.mjs"
   },
+  "dependencies": {
+    "jszip": "^3.10.1"
+  },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",

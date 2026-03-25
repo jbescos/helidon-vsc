@@ -6,15 +6,15 @@ VS Code extension for Helidon that will grow into framework tooling comparable t
 
 Current MVP feature:
 
-- Helidon configuration completion in `application.properties`
+- Helidon configuration completion in `application.properties` / `microprofile-config.properties`
 - Helidon configuration completion in `application.yaml` / `application.yml`
-- Hover documentation for known Helidon properties in `application.properties`
+- Hover documentation for known Helidon properties in `application.properties` / `microprofile-config.properties`
 - Hover documentation for known Helidon properties in `application.yaml` / `application.yml`
-- Conservative diagnostics for unknown Helidon configuration keys in `application.properties`
+- Conservative diagnostics for unknown Helidon configuration keys in `application.properties` / `microprofile-config.properties`
 - Conservative diagnostics for unknown Helidon configuration keys in `application.yaml` / `application.yml`
 - Helidon project generation command using Helidon Maven archetypes
 
-When editing an `application.properties` file, typing prefixes like `server.` will offer Helidon configuration keys such as:
+When editing an `application.properties` or `microprofile-config.properties` file, typing prefixes like `server.` will offer Helidon configuration keys such as:
 
 - `server.port`
 - `server.host`
@@ -51,14 +51,10 @@ Diagnostics currently warn only for unknown keys under known Helidon config root
 
 ## Metadata source
 
-The current prototype no longer keeps Helidon metadata inline in TypeScript.
-Instead, the extension reads it from:
+The extension reads Helidon metadata from the Java classpath using the `Language Support for Java(TM) by Red Hat` extension API.
+It resolves the runtime classpath for the current workspace and reads `META-INF/helidon/config-metadata.json` from directories and dependency JARs.
 
-- `src/metadata/helidon-config-metadata.json`
-
-This is still mocked metadata for now, but it is structured so we can later replace it with generated Helidon metadata or metadata extracted from future Helidon artifacts.
-
-The file now follows a more IntelliJ/Helidon-like structured shape based on modules, config types, and options, and the extension flattens that into keys for completion and hover.
+There is no bundled fallback metadata catalog anymore. If the Java extension is missing, or the Java workspace has not finished loading, Helidon completion and hover will stay unavailable and the extension will show a warning.
 
 Use the command palette command **Helidon: Trigger Config Completion** to manually open suggestions while testing.
 
@@ -82,7 +78,8 @@ Supported archetype choices right now:
 ## Requirements
 
 - Visual Studio Code
-- Open a Helidon-style `application.properties` file to test completions
+- Extension Pack for Java
+- Open the Helidon project as a Java workspace in VS Code
 
 ## Extension Settings
 
@@ -90,12 +87,9 @@ No custom settings yet.
 
 ## Known Issues
 
-- The current metadata catalog is static and intentionally small.
-- The current metadata file is mocked and manually maintained.
-- Completion and hover support are currently scoped to Helidon-style `application.properties`, `application.yaml`, and `application.yml` files.
-- Hover currently targets known static Helidon keys only.
-- Validation remains metadata-driven, so gaps in the metadata catalog can still miss valid keys.
-- Java language-server integration is still planned later.
+- Completion and hover support are currently scoped to Helidon-style `application.properties`, `microprofile-config.properties`, `application.yaml`, and `application.yml` files.
+- Completion, hover, and diagnostics depend on Java classpath metadata being available from `redhat.java`.
+- If the Java workspace is still loading, Helidon metadata may appear a moment later after classpath resolution finishes.
 
 ## Release Notes
 

@@ -1,28 +1,12 @@
 import * as vscode from 'vscode';
-import { loadHelidonConfigMetadata } from './metadata';
+import { HelidonConfigProperty } from './metadata';
 
-export interface HelidonConfigProperty {
-	key: string;
-	type: string;
-	defaultValue?: string;
-	description: string;
-	example?: string;
-}
+export const HELIDON_CONFIG_PROPERTIES: HelidonConfigProperty[] = [];
 
-export const HELIDON_CONFIG_PROPERTIES: HelidonConfigProperty[] = loadHelidonConfigMetadata();
-
-const HELIDON_CONFIG_PROPERTY_MAP = new Map(
-	HELIDON_CONFIG_PROPERTIES.map((property) => [property.key, property] as const)
-);
-const NORMALIZED_HELIDON_CONFIG_KEYS = new Set(
-	HELIDON_CONFIG_PROPERTIES.map((property) => normalizeConfigKey(property.key))
-);
-const NORMALIZED_HELIDON_CONFIG_PREFIXES = new Set(
-	HELIDON_CONFIG_PROPERTIES.flatMap((property) => configKeyPrefixes(property.key))
-);
-const HELIDON_CONFIG_ROOTS = new Set(
-	HELIDON_CONFIG_PROPERTIES.map((property) => normalizeConfigKey(property.key).split('.')[0])
-);
+let helidonConfigPropertyMap = new Map<string, HelidonConfigProperty>();
+let normalizedHelidonConfigKeys = new Set<string>();
+let normalizedHelidonConfigPrefixes = new Set<string>();
+let helidonConfigRoots = new Set<string>();
 const YAML_KEY_SEGMENT_PATTERN = /[A-Za-z0-9_-]+/;
 
 interface ConfigKeyDiagnosticTarget {
@@ -50,8 +34,20 @@ function propertyMarkdown(property: HelidonConfigProperty): vscode.MarkdownStrin
 	return markdown;
 }
 
+function rebuildHelidonConfigIndexes(properties: readonly HelidonConfigProperty[]): void {
+	helidonConfigPropertyMap = new Map(properties.map((property) => [property.key, property] as const));
+	normalizedHelidonConfigKeys = new Set(properties.map((property) => normalizeConfigKey(property.key)));
+	normalizedHelidonConfigPrefixes = new Set(properties.flatMap((property) => configKeyPrefixes(property.key)));
+	helidonConfigRoots = new Set(properties.map((property) => normalizeConfigKey(property.key).split('.')[0]));
+}
+
+export function replaceHelidonConfigProperties(properties: readonly HelidonConfigProperty[]): void {
+	HELIDON_CONFIG_PROPERTIES.splice(0, HELIDON_CONFIG_PROPERTIES.length, ...properties);
+	rebuildHelidonConfigIndexes(HELIDON_CONFIG_PROPERTIES);
+}
+
 export function findHelidonConfigProperty(key: string): HelidonConfigProperty | undefined {
-	return HELIDON_CONFIG_PROPERTY_MAP.get(key);
+	return helidonConfigPropertyMap.get(key);
 }
 
 function normalizeConfigSegment(segment: string): string {
@@ -77,14 +73,14 @@ function configKeyPrefixes(key: string): string[] {
 
 function shouldValidateHelidonConfigKey(key: string): boolean {
 	const [root] = normalizeConfigKey(key).split('.');
-	return Boolean(root) && HELIDON_CONFIG_ROOTS.has(root);
+	return Boolean(root) && helidonConfigRoots.has(root);
 }
 
 function isKnownHelidonConfigKey(key: string): boolean {
 	const normalizedKey = normalizeConfigKey(key);
 	return (
-		NORMALIZED_HELIDON_CONFIG_KEYS.has(normalizedKey) ||
-		NORMALIZED_HELIDON_CONFIG_PREFIXES.has(normalizedKey)
+		normalizedHelidonConfigKeys.has(normalizedKey) ||
+		normalizedHelidonConfigPrefixes.has(normalizedKey)
 	);
 }
 
@@ -113,7 +109,10 @@ export function isHelidonYamlDocument(document: vscode.TextDocument): boolean {
 	}
 
 	const fileName = document.fileName.toLowerCase();
-	return fileName.endsWith('application.yaml') || fileName.endsWith('application.yml');
+	return (
+		fileName.endsWith('application.yaml') ||
+		fileName.endsWith('application.yml')
+	);
 }
 
 function yamlIndent(text: string): number {
@@ -303,16 +302,15 @@ function hoverForYaml(document: vscode.TextDocument, position: vscode.Position):
 }
 
 export function isHelidonPropertiesDocument(document: vscode.TextDocument): boolean {
-	if (document.languageId !== 'properties') {
-		return false;
-	}
-
 	const fileName = document.fileName.toLowerCase();
-	return fileName.endsWith('application.properties');
+	return (
+		fileName.endsWith('application.properties') ||
+		fileName.endsWith('microprofile-config.properties')
+	);
 }
 
 export function collectHelidonPropertiesDiagnostics(document: vscode.TextDocument): vscode.Diagnostic[] {
-	if (document.languageId !== 'properties') {
+	if (!isHelidonPropertiesDocument(document)) {
 		return [];
 	}
 
