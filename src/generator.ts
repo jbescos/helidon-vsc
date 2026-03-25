@@ -707,21 +707,6 @@ export async function generateHelidonProject(): Promise<void> {
 	await generateHelidonProjectWithMavenArchetype();
 }
 
-export async function generateHelidonRunFiles(target?: WorkspaceTarget): Promise<void> {
-	const workspaceFolder = await resolveWorkspaceFolder(target, 'generating VS Code run files');
-	if (!workspaceFolder) {
-		return;
-	}
-
-	const runSupport = await prepareHelidonRunSupport(workspaceFolder);
-	if (!runSupport) {
-		return;
-	}
-
-	const vscodeDir = await writeHelidonRunFiles(runSupport);
-	vscode.window.showInformationMessage(`Generated VS Code run files in ${vscodeDir}`);
-}
-
 export async function runHelidonProject(target?: WorkspaceTarget): Promise<void> {
 	await startHelidonProjectDebugSession(true, target);
 }

@@ -207,7 +207,6 @@ Testing against `/home/jbescos/workspace/demo-helidon` surfaced important runtim
 - opening `microprofile-config.properties` originally did not activate the extension because VS Code used `java-properties`; activation now includes `onLanguage:java-properties`
 - metadata was sometimes unavailable at first startup because Java classpaths were not ready yet; the extension now retries automatically for a short startup window
 - a `Helidon` output channel was added for runtime debugging
-- a debug command `Helidon: Reload Extension` was added to force a clean window reload during testing
 
 ### 10. First richer inspections pass
 Implemented a first non-trivial diagnostics/inspection step:
@@ -277,7 +276,6 @@ Implemented an initial endpoint feature set in the VS Code extension:
 - HTTP method detection for `@GET`, `@POST`, `@PUT`, `@DELETE`, `@PATCH`, `@HEAD`, and `@OPTIONS`
 - endpoint grouping by resource class
 - click-through navigation from endpoint tree items back to the Java method source
-- manual refresh command: `Helidon: Refresh Endpoints`
 
 Important scope note:
 - this is currently a conservative source scan, not a Java semantic model
@@ -340,8 +338,6 @@ Implemented the first substantial parity move beyond JAX-RS-only endpoint suppor
 - service registrations are combined with discovered service-local routes to form full endpoint paths
 - endpoint code lenses were added in Java editors as the VS Code equivalent of IntelliJ’s endpoint inlay affordances
 - basic path-variable navigation was added for common request accessor patterns such as `.param("name")`
-- a new helper command was added:
-  - `Helidon: Generate Run Files`
 - run-file generation creates or updates:
   - `.vscode/tasks.json`
   - `.vscode/launch.json`
@@ -377,8 +373,8 @@ Implemented the first actual run/debug workflow on top of the earlier scaffold g
 - UI entry points added:
   - always-visible status bar buttons for Run and Debug when a workspace folder is open
   - status bar Stop button while a Helidon session/task is active
-  - toolbar buttons in the `Helidon Endpoints` view title for Run, Debug, Stop, Generate Run Files, and Refresh
-  - Explorer folder context-menu actions for Run, Debug, Stop, and Generate Run Files
+  - toolbar buttons in the `Helidon Endpoints` view title for Run, Debug, and Stop
+  - Explorer folder context-menu actions for Run, Debug, and Stop
   - Explorer-triggered actions resolve the selected folder back to its open workspace folder before launch
   - view-title actions were hardened to accept tree-view payloads such as selected endpoint/group items
   - Stop targets tracked Helidon Java launch sessions first and falls back to terminating Helidon tasks
@@ -387,6 +383,25 @@ Important scope note:
 - this is still built on standard VS Code Java launch/debug support, not a custom Helidon runtime panel or dashboard
 - Gradle run-task generation is still conservative and assumes a standard `run` task is available
 - main-class fallback is intentionally conservative; projects without a discoverable `main` class or recognizable MP markers still need manual adjustment
+
+### 20. Endpoint refresh UX cleanup
+Removed the manual endpoint refresh command after validating that automatic refresh now covers the normal workflow:
+- refresh on extension activation
+- refresh on Java editor changes
+- refresh on workspace-folder changes
+- refresh on Java file create/change/delete events in the workspace
+
+Important scope note:
+- this removes the extra `Helidon: Refresh Endpoints` command/button, but endpoint refresh still depends on VS Code file events; if a future edge case appears, investigate the watcher path rather than re-adding UI by default
+
+### 21. Run helper UX cleanup
+Removed the separate `Helidon: Generate Run Files` command after validating that it no longer adds essential workflow value:
+- `Helidon: Run Project` and `Helidon: Debug Project` already generate or refresh the same `.vscode/tasks.json` and `.vscode/launch.json` scaffold before launch
+- internal run-file generation remains in place as implementation detail for the run/debug workflow
+- user-facing toolbar and Explorer actions were simplified to Run, Debug, and Stop
+
+Important scope note:
+- this is a UX cleanup, not a capability removal; the extension still writes the same VS Code launch/task scaffold when starting a Helidon project
 
 ---
 
@@ -719,11 +734,10 @@ Also defer competitor benchmarking until the Helidon extension is in a more comp
 - [x] activation for Java source files
 - [x] Java-side `Config.get("...")` completion / hover / diagnostics / navigation
 - [x] runtime debug output channel
-- [x] `Helidon: Reload Extension` debug command
 - [x] example/demo project
 - [x] Helidon project generation command using expanded built-in Maven archetypes
 - [x] Helidon CLI project-generation wizard launcher for richer archetype/feature selection during setup
-- [x] optional `.vscode/launch.json` / `.vscode/tasks.json` helper generation
+- [x] automatic `.vscode/launch.json` / `.vscode/tasks.json` generation for run/debug
 - [x] `Helidon: Run Project` helper command
 - [x] `Helidon: Debug Project` helper command
 - [x] `Helidon: Stop Project` helper command
@@ -811,13 +825,10 @@ If inspections are tackled, be conservative because missing classpath metadata c
    - verify Java endpoint code lenses appear and open the corresponding method
    - verify common path-parameter usages such as `.param("name")` navigate back to a matching route pattern
    - output panel → `Helidon`
-   - command palette → `Helidon: Refresh Endpoints`
    - command palette → `Helidon: Generate Project`
-   - command palette → `Helidon: Generate Run Files`
    - command palette → `Helidon: Run Project`
    - command palette → `Helidon: Debug Project`
    - command palette → `Helidon: Stop Project`
-   - command palette → `Helidon: Reload Extension` (debug only)
 
 ---
 

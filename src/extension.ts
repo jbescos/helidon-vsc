@@ -17,7 +17,6 @@ import {
 	extractWorkspaceUriFromTarget,
 	generateHelidonProject,
 	generateHelidonProjectWithCliWizard,
-	generateHelidonRunFiles,
 	isHelidonDebugSession,
 	isHelidonTaskExecution,
 	runHelidonProject,
@@ -164,13 +163,6 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	);
 
-	const generateRunFilesCommand = vscode.commands.registerCommand(
-		'helidon-vsc.generateRunFiles',
-		async (target?: unknown) => {
-			await generateHelidonRunFiles(target);
-		}
-	);
-
 	const runProjectCommand = vscode.commands.registerCommand(
 		'helidon-vsc.runProject',
 		async (target?: unknown) => {
@@ -265,10 +257,6 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	);
 
-	const reloadExtensionCommand = vscode.commands.registerCommand('helidon-vsc.reloadExtension', async () => {
-		await vscode.commands.executeCommand('workbench.action.reloadWindow');
-	});
-
 	const openEndpointCommand = vscode.commands.registerCommand(
 		'helidon-vsc.openEndpoint',
 		async (uri: vscode.Uri, range?: vscode.Range) => {
@@ -317,10 +305,6 @@ export function activate(context: vscode.ExtensionContext) {
 
 		stopStatusBarItem.hide();
 	};
-
-	const refreshEndpointsCommand = vscode.commands.registerCommand('helidon-vsc.refreshEndpoints', async () => {
-		await refreshEndpointsView();
-	});
 
 	const refreshDiagnostics = (document: vscode.TextDocument) => {
 		const issues = [...collectHelidonDiagnostics(document), ...collectHelidonJavaDiagnostics(document)];
@@ -485,24 +469,15 @@ export function activate(context: vscode.ExtensionContext) {
 	const taskEnded = vscode.tasks.onDidEndTask(() => {
 		void updateRunningContext();
 	});
-	const javaFileCreated = vscode.workspace.onDidCreateFiles((event) => {
-		if (event.files.some((file) => file.path.endsWith('.java'))) {
-			void refreshEndpointsView();
-		}
+	const javaFileWatcher = vscode.workspace.createFileSystemWatcher('**/*.java');
+	const javaFileChanged = javaFileWatcher.onDidChange(() => {
+		void refreshEndpointsView();
 	});
-	const javaFileDeleted = vscode.workspace.onDidDeleteFiles((event) => {
-		if (event.files.some((file) => file.path.endsWith('.java'))) {
-			void refreshEndpointsView();
-		}
+	const javaFileCreated = javaFileWatcher.onDidCreate(() => {
+		void refreshEndpointsView();
 	});
-	const javaFileRenamed = vscode.workspace.onDidRenameFiles((event) => {
-		if (
-			event.files.some(
-				(file) => file.oldUri.path.endsWith('.java') || file.newUri.path.endsWith('.java')
-			)
-		) {
-			void refreshEndpointsView();
-		}
+	const javaFileDeleted = javaFileWatcher.onDidDelete(() => {
+		void refreshEndpointsView();
 	});
 
 	context.subscriptions.push(
@@ -525,13 +500,10 @@ export function activate(context: vscode.ExtensionContext) {
 		codeActionProvider,
 		generateProjectCommand,
 		generateProjectCliWizardCommand,
-		generateRunFilesCommand,
 		runProjectCommand,
 		debugProjectCommand,
 		stopProjectCommand,
-		reloadExtensionCommand,
 		openEndpointCommand,
-		refreshEndpointsCommand,
 		openDocumentDiagnostics,
 		changeDocumentDiagnostics,
 		closeDocumentDiagnostics,
@@ -540,9 +512,10 @@ export function activate(context: vscode.ExtensionContext) {
 		debugSessionTerminated,
 		taskStarted,
 		taskEnded,
+		javaFileWatcher,
+		javaFileChanged,
 		javaFileCreated,
 		javaFileDeleted,
-		javaFileRenamed,
 	);
 
 	void refreshMetadataFromJavaClasspaths();

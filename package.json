@@ -18,12 +18,9 @@
     "onView:helidonEndpoints",
     "onCommand:helidon-vsc.generateProject",
     "onCommand:helidon-vsc.generateProjectCliWizard",
-    "onCommand:helidon-vsc.generateRunFiles",
     "onCommand:helidon-vsc.runProject",
     "onCommand:helidon-vsc.debugProject",
-    "onCommand:helidon-vsc.stopProject",
-    "onCommand:helidon-vsc.refreshEndpoints",
-    "onCommand:helidon-vsc.reloadExtension"
+    "onCommand:helidon-vsc.stopProject"
   ],
   "main": "./dist/extension.js",
   "extensionDependencies": [
@@ -40,11 +37,6 @@
         "title": "Helidon: Generate Project with CLI Wizard"
       },
       {
-        "command": "helidon-vsc.generateRunFiles",
-        "title": "Helidon: Generate Run Files",
-        "icon": "$(gear)"
-      },
-      {
         "command": "helidon-vsc.runProject",
         "title": "Helidon: Run Project",
         "icon": "$(run)"
@@ -58,15 +50,6 @@
         "command": "helidon-vsc.stopProject",
         "title": "Helidon: Stop Project",
         "icon": "$(debug-stop)"
-      },
-      {
-        "command": "helidon-vsc.refreshEndpoints",
-        "title": "Helidon: Refresh Endpoints",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "helidon-vsc.reloadExtension",
-        "title": "Helidon: Reload Extension"
       }
     ],
     "views": {
@@ -90,19 +73,9 @@
           "group": "navigation@2"
         },
         {
-          "command": "helidon-vsc.generateRunFiles",
-          "when": "view == helidonEndpoints",
-          "group": "navigation@3"
-        },
-        {
           "command": "helidon-vsc.stopProject",
           "when": "view == helidonEndpoints && helidonVsc.canStopProject",
-          "group": "navigation@4"
-        },
-        {
-          "command": "helidon-vsc.refreshEndpoints",
-          "when": "view == helidonEndpoints",
-          "group": "navigation@5"
+          "group": "navigation@3"
         }
       ],
       "explorer/context": [
@@ -117,14 +90,9 @@
           "group": "2_workspace@2"
         },
         {
-          "command": "helidon-vsc.generateRunFiles",
-          "when": "explorerViewletVisible && explorerResourceIsFolder && resourceScheme == file",
-          "group": "2_workspace@3"
-        },
-        {
           "command": "helidon-vsc.stopProject",
           "when": "explorerViewletVisible && explorerResourceIsFolder && resourceScheme == file && helidonVsc.canStopProject",
-          "group": "2_workspace@4"
+          "group": "2_workspace@3"
         }
       ]
     }
