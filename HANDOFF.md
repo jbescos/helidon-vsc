@@ -497,12 +497,134 @@ That command was scaffold residue on our side and should stay removed.
 
 ---
 
+## Competitor VS Code snapshot (for later comparison)
+This section is here so a later Spring/Micronaut/Quarkus comparison does not need to repeat the same baseline research.
+
+Snapshot date:
+- March 25, 2026
+
+Official sources checked for this snapshot:
+- Spring Tools wiki/changelog
+- `microsoft/vscode-spring-initializr`
+- `microsoft/vscode-spring-boot-dashboard`
+- Oracle GraalVM docs for `GraalVM Tools for Micronaut`
+- Oracle GraalVM docs for the `GraalVM Extension Pack for Java`
+- `redhat-developer/vscode-quarkus`
+- Red Hat Developer article on recent Quarkus VS Code tooling updates
+
+### Spring
+Spring’s VS Code story is spread across Spring Tools plus companion extensions rather than a single small framework-only plugin.
+
+Observed Spring capabilities:
+- Spring Tools documents VS Code support areas such as content assist, navigation, live application information, version validation, upgrade support, validations/quick fixes, Boot Properties Editor, WebFlux support, and Boot Dashboard
+- `Spring Initializr Java Support` generates Spring Boot projects for Maven or Gradle
+- the Initializr flow supports choosing language, Java version, Boot version, group/artifact, dependencies, and quickstart with previous settings
+- the Initializr extension can also edit Spring Boot dependencies for existing Maven projects
+- `Spring Boot Dashboard` shows Spring Boot apps in the workspace
+- the dashboard can start/stop/debug apps, open them in the browser, list beans/endpoint mappings, and show bean dependencies
+
+Recent Spring Tools changelog highlights worth remembering:
+- properties/yaml to Java navigation
+- request-mapping live hovers and route-related navigation
+- live data UI updates in VS Code
+- active profile display in the dashboard
+- `.properties` <-> `.yml` conversion support
+- newer Java-aware features such as bean injection completion proposals and structural/outline improvements
+
+Practical takeaway:
+- Spring is the strongest benchmark here for live runtime insight, Spring-aware Java analysis, and project/dashboard workflow depth, not just config editing
+
+### Micronaut
+Micronaut’s VS Code story is more workflow/platform-oriented and heavily tied to GraalVM tooling.
+
+Observed Micronaut capabilities:
+- project creation wizard
+- editing and debugging support for Micronaut projects
+- code completion and navigation for Micronaut YAML config files and Java
+- ahead-of-time native executable builds with GraalVM Native Image
+- continuous run/reload mode
+- Docker image build/deploy support
+- Kubernetes support
+- database integration and database explorer
+- Oracle Cloud explorer / OCI-oriented tooling
+
+Micronaut project creation flow is richer than our current archetype command:
+- application type choice
+- Micronaut version
+- Java version
+- project name and base package
+- language choice: Java, Kotlin, or Groovy
+- feature selection
+- build tool choice: Maven or Gradle
+- test framework choice
+
+Practical takeaway:
+- Micronaut is the strongest benchmark for native-image, cloud/deploy, database, and broader developer-workflow integration in VS Code
+
+### Quarkus
+Quarkus is the closest direct VS Code benchmark for framework-aware editing features inside the editor.
+
+Observed Quarkus capabilities:
+- generate project
+- add extensions to the current project
+- debug the current Quarkus project via dev mode
+- build native/executable output
+- `application.properties` / `microprofile-config.properties` completion, hover, definition, formatting, validation, quick fixes, profiles, outline, and snippets
+- `application.yaml` / `application.yml` completion, hover, validation, profiles, and outline
+- Java completion, hover, validation, quick fixes, code lenses, and snippets
+- Qute template support
+- Renarde support
+
+Recent Quarkus-specific updates worth remembering:
+- system property and environment variable resolution in config files, shown as inlay hints
+- Reactive Routes support with URL CodeLens
+
+Practical takeaway:
+- Quarkus is likely the best direct parity target for Helidon on config intelligence, Java-aware framework support, and endpoint/route UX inside VS Code
+
+### Common feature table
+This table intentionally groups features at a high level.
+Exact implementation details differ across Spring, Micronaut, and Quarkus, but these are the clearest common extension capabilities worth tracking for Helidon.
+
+Status legend:
+- `Yes` = clearly supported
+- `Partial` = supported in a narrower or more conservative form
+- `No` = not currently supported in the Helidon extension
+
+| Common feature area | Spring | Micronaut | Quarkus | Helidon today | Helidon note |
+| --- | --- | --- | --- | --- | --- |
+| Project generation / starter creation | Yes | Yes | Yes | Partial | `Helidon: Generate Project` exists, but it is still Maven-archetype-based and much narrower than competitor wizards |
+| Framework feature/dependency selection during project setup or afterward | Yes | Yes | Yes | No | Helidon currently offers archetype selection only, not starter-feature/dependency selection |
+| Framework config authoring in properties/YAML (completion, docs/hover) | Yes | Yes | Yes | Yes | Supported for Helidon properties/YAML files including environment-specific variants |
+| Framework config diagnostics, navigation, and quick fixes | Yes | Partial | Yes | Partial | Helidon has conservative diagnostics, placeholder navigation, and some quick fixes, but coverage is still limited |
+| Framework-aware Java assistance | Yes | Yes | Yes | Partial | Helidon currently supports `Config.get("...")` plus some endpoint/path-aware features, not broader Helidon Java APIs yet |
+| Run/debug workflow integration | Yes | Yes | Yes | Partial | Helidon can generate `.vscode/tasks.json` and `.vscode/launch.json`, but does not yet have richer framework-specific run/debug UX |
+
+### Future comparison axes
+When the Helidon extension is more complete, the later comparison should look at least at:
+- config-file completion/hover/validation depth
+- value/reference intelligence and quick-fix quality
+- Java-side framework API coverage
+- endpoint/route discovery, navigation, and in-editor affordances
+- project generation depth
+- run/debug workflow support
+- live runtime insight/dashboard capabilities
+- cloud/native/deploy/database workflow integration
+
+Important note:
+- this competitor snapshot is reference material only
+- it should not change the current implementation priority, which remains Helidon feature delivery first
+
+---
+
 ## What is intentionally NOT the focus right now
 Per latest decision with the user:
 - keep using the simple `redhat.java` API integration path
 - do **not** pivot to a custom Java language-server plugin unless explicitly requested
+- do **not** spend time on a formal comparison against Spring, Micronaut, and Quarkus VS Code extensions until the Helidon extension work is concluded
 
 So for the next conversation, do **not** center the work around a deeper JDT LS plugin integration unless explicitly requested again.
+Also defer competitor benchmarking until the Helidon extension is in a more complete state; keep current effort focused on Helidon implementation work first.
 
 ---
 
