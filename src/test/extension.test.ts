@@ -7,7 +7,7 @@ import JSZip = require('jszip');
 // You can import and use all API from the 'vscode' module
 // as well as import your extension to test it
 import * as vscode from 'vscode';
-import { parseJavaJaxRsEndpoints } from '../endpoints';
+import { parseJavaHelidonRoutingEndpoints, parseJavaJaxRsEndpoints } from '../endpoints';
 import {
 	collectHelidonPropertiesDiagnostics,
 	collectHelidonYamlDiagnostics,
@@ -17,6 +17,7 @@ import {
 	isHelidonYamlDocument,
 	replaceHelidonConfigProperties,
 } from '../helidonConfig';
+import { parseJavaConfigReferences } from '../javaConfig';
 import { parseHelidonConfigMetadata, type HelidonConfigProperty } from '../metadata';
 import { loadHelidonConfigMetadataFromJavaClasspaths, type JavaExtensionApi } from '../javaMetadata';
 
@@ -282,6 +283,56 @@ suite('Extension Test Suite', () => {
 		assert.deepStrictEqual(endpoints, []);
 	});
 
+	test('Helidon routing parser discovers service-style route methods', () => {
+		const endpoints = parseJavaHelidonRoutingEndpoints(`
+			public class GreetService {
+			    void update(Routing.Rules rules) {
+			        rules.get("/", this::getDefaultMessageHandler)
+			             .get("/{name}", this::getMessageHandler)
+			             .put("/greeting", this::updateGreetingHandler);
+			    }
+
+			    void getDefaultMessageHandler(ServerRequest req, ServerResponse res) {
+			    }
+
+			    void getMessageHandler(ServerRequest req, ServerResponse res) {
+			    }
+
+			    void updateGreetingHandler(ServerRequest req, ServerResponse res) {
+			    }
+			}
+		`);
+
+		assert.deepStrictEqual(
+			endpoints.map((endpoint) => ({
+				className: endpoint.className,
+				methodName: endpoint.methodName,
+				httpMethod: endpoint.httpMethod,
+				path: endpoint.path,
+			})),
+			[
+				{ className: 'GreetService', methodName: 'getDefaultMessageHandler', httpMethod: 'GET', path: '/' },
+				{ className: 'GreetService', methodName: 'getMessageHandler', httpMethod: 'GET', path: '/{name}' },
+				{ className: 'GreetService', methodName: 'updateGreetingHandler', httpMethod: 'PUT', path: '/greeting' },
+			]
+		);
+	});
+
+	test('Java config parser discovers Config.get string literals', () => {
+		const references = parseJavaConfigReferences(`
+			import io.helidon.config.Config;
+
+			class Demo {
+			    void load(Config config) {
+			        config.get("server.port").asInt();
+			        config.get("metrics.enabled").asBoolean();
+			    }
+			}
+		`);
+
+		assert.deepStrictEqual(references.map((reference) => reference.key), ['server.port', 'metrics.enabled']);
+	});
+
 	test('findHelidonConfigProperty finds known Helidon property metadata', () => {
 		seedTestMetadata();
 		const property = findHelidonConfigProperty('server.port');
@@ -323,6 +374,14 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(isHelidonPropertiesDocument(document), true);
 	});
 
+	test('application-dev.properties is recognized as a Helidon properties document', () => {
+		const document = {
+			fileName: '/tmp/application-dev.properties',
+			languageId: 'plaintext',
+		} as vscode.TextDocument;
+		assert.strictEqual(isHelidonPropertiesDocument(document), true);
+	});
+
 	test('non application.properties file names are ignored', async () => {
 		const document = await vscode.workspace.openTextDocument({
 			language: 'properties',
@@ -340,6 +399,14 @@ suite('Extension Test Suite', () => {
 	test('non application YAML file names are ignored', async () => {
 		const document = await vscode.workspace.openTextDocument(vscode.Uri.parse('untitled:/values.yaml'));
 		assert.strictEqual(isHelidonYamlDocument(document), false);
+	});
+
+	test('application-prod.yaml is recognized as a Helidon YAML document', () => {
+		const document = {
+			fileName: '/tmp/application-prod.yaml',
+			languageId: 'yaml',
+		} as vscode.TextDocument;
+		assert.strictEqual(isHelidonYamlDocument(document), true);
 	});
 
 	test('properties diagnostics warn for unknown keys under known Helidon roots', async () => {
@@ -496,6 +563,22 @@ suite('Extension Test Suite', () => {
 		}
 	});
 
+	test('properties diagnostics validate placeholder references under known Helidon roots', async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'helidon-vsc-properties-placeholders-'));
+		try {
+			const filePath = path.join(tempRoot, 'microprofile-config.properties');
+			await fs.writeFile(filePath, 'server.port=${server.prt}', 'utf8');
+			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+
+			seedTestMetadata();
+			const diagnostics = collectHelidonPropertiesDiagnostics(document);
+			assert.strictEqual(diagnostics.length, 1);
+			assert.strictEqual(diagnostics[0].message, "Unknown Helidon configuration key 'server.prt'.");
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
 	test('yaml diagnostics warn for unknown keys under known Helidon roots', async () => {
 		const document = await vscode.workspace.openTextDocument({
 			language: 'yaml',
@@ -569,6 +652,21 @@ suite('Extension Test Suite', () => {
 		seedTestMetadata();
 		const diagnostics = collectHelidonYamlDiagnostics(document);
 		assert.strictEqual(diagnostics.length, 0);
+	});
+
+	test('yaml diagnostics validate placeholder references under known Helidon roots', async () => {
+		const document = await vscode.workspace.openTextDocument({
+			language: 'yaml',
+			content: [
+				'server:',
+				'  port: ${server.prt}',
+			].join('\n'),
+		});
+
+		seedTestMetadata();
+		const diagnostics = collectHelidonYamlDiagnostics(document);
+		assert.strictEqual(diagnostics.length, 1);
+		assert.strictEqual(diagnostics[0].message, "Unknown Helidon configuration key 'server.prt'.");
 	});
 
 	test('yaml diagnostics report nested keys under scalar properties', async () => {

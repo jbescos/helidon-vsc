@@ -3,13 +3,21 @@ import { HelidonConfigProperty } from './metadata';
 
 export const HELIDON_CONFIG_PROPERTIES: HelidonConfigProperty[] = [];
 
+interface ConfigSchemaNode {
+	children: Map<string, ConfigSchemaNode>;
+	property?: HelidonConfigProperty;
+}
+
 let helidonConfigPropertyMap = new Map<string, HelidonConfigProperty>();
 let normalizedHelidonConfigKeys = new Set<string>();
 let normalizedHelidonConfigPrefixes = new Set<string>();
 let helidonConfigRoots = new Set<string>();
 let normalizedHelidonConfigKeyMap = new Map<string, string[]>();
 let normalizedHelidonConfigPropertyByKey = new Map<string, HelidonConfigProperty>();
+let helidonConfigSchemaRoot: ConfigSchemaNode = { children: new Map() };
 const YAML_KEY_SEGMENT_PATTERN = /[A-Za-z0-9_-]+/;
+const HELIDON_APPLICATION_PROPERTIES_PATTERN = /(?:^|\/)(application(?:-[^/]+)?|microprofile-config)\.properties$/iu;
+const HELIDON_APPLICATION_YAML_PATTERN = /(?:^|\/)application(?:-[^/]+)?\.ya?ml$/iu;
 
 interface ConfigKeyDiagnosticTarget {
 	key: string;
@@ -57,6 +65,27 @@ interface ParsedPropertiesAssignment {
 	valueRange?: vscode.Range;
 }
 
+interface PlaceholderReference extends ConfigKeyDiagnosticTarget {
+	defaultValue?: string;
+}
+
+interface ConfigKeyResolution {
+	matchedProperty?: HelidonConfigProperty;
+	isKnown: boolean;
+	isPrefix: boolean;
+	pathIssue?: PathValidationIssue;
+}
+
+export interface HelidonConfigKeyResolution {
+	matchedProperty?: HelidonConfigProperty;
+	isKnown: boolean;
+	isPrefix: boolean;
+	pathIssue?: {
+		code: string;
+		message: string;
+	};
+}
+
 function propertyMarkdown(property: HelidonConfigProperty): vscode.MarkdownString {
 	const markdown = new vscode.MarkdownString(undefined, true);
 	markdown.appendMarkdown(`**${property.key}**\n\n`);
@@ -79,6 +108,7 @@ function rebuildHelidonConfigIndexes(properties: readonly HelidonConfigProperty[
 	helidonConfigRoots = new Set(properties.map((property) => normalizeConfigKey(property.key).split('.')[0]));
 	normalizedHelidonConfigKeyMap = new Map<string, string[]>();
 	normalizedHelidonConfigPropertyByKey = new Map<string, HelidonConfigProperty>();
+	helidonConfigSchemaRoot = { children: new Map() };
 	for (const property of properties) {
 		const normalizedKey = normalizeConfigKey(property.key);
 		const keys = normalizedHelidonConfigKeyMap.get(normalizedKey) ?? [];
@@ -87,6 +117,7 @@ function rebuildHelidonConfigIndexes(properties: readonly HelidonConfigProperty[
 		if (!normalizedHelidonConfigPropertyByKey.has(normalizedKey)) {
 			normalizedHelidonConfigPropertyByKey.set(normalizedKey, property);
 		}
+		insertConfigSchemaProperty(normalizedKey, property);
 	}
 }
 
@@ -96,7 +127,11 @@ export function replaceHelidonConfigProperties(properties: readonly HelidonConfi
 }
 
 export function findHelidonConfigProperty(key: string): HelidonConfigProperty | undefined {
-	return helidonConfigPropertyMap.get(key);
+	return resolveHelidonConfigKey(key).matchedProperty ?? helidonConfigPropertyMap.get(key);
+}
+
+export function resolveHelidonConfigPropertyKey(key: string): HelidonConfigKeyResolution {
+	return resolveHelidonConfigKey(key);
 }
 
 function normalizeConfigSegment(segment: string): string {
@@ -136,17 +171,101 @@ function configKeyPrefixes(key: string): string[] {
 	return segments.slice(0, -1).map((_, index) => segments.slice(0, index + 1).join('.'));
 }
 
+function insertConfigSchemaProperty(normalizedKey: string, property: HelidonConfigProperty): void {
+	const segments = normalizedKey.split('.').filter((segment) => segment.length > 0);
+	let node = helidonConfigSchemaRoot;
+	for (const segment of segments) {
+		let child = node.children.get(segment);
+		if (!child) {
+			child = { children: new Map() };
+			node.children.set(segment, child);
+		}
+		node = child;
+	}
+	node.property = property;
+}
+
+function resolveHelidonConfigKey(key: string): ConfigKeyResolution {
+	const normalizedSegments = normalizeConfigKey(key).split('.').filter((segment) => segment.length > 0);
+	let node = helidonConfigSchemaRoot;
+
+	for (let index = 0; index < normalizedSegments.length; index++) {
+		const segment = normalizedSegments[index];
+		const child = node.children.get(segment) ?? node.children.get('*');
+		if (child) {
+			node = child;
+			continue;
+		}
+
+		if (node.property) {
+			if (isListProperty(node.property)) {
+				return {
+					matchedProperty: node.property,
+					isKnown: false,
+					isPrefix: false,
+					pathIssue: {
+						code: 'list-property-missing-index',
+						message: `Helidon configuration list '${node.property.key}' requires an index before nested keys.`,
+					},
+				};
+			}
+
+			if (isMapProperty(node.property)) {
+				if (index === normalizedSegments.length - 1) {
+					return {
+						matchedProperty: node.property,
+						isKnown: true,
+						isPrefix: false,
+					};
+				}
+
+				return {
+					matchedProperty: node.property,
+					isKnown: false,
+					isPrefix: false,
+					pathIssue: {
+						code: 'map-property-invalid-nested-key',
+						message: `Helidon configuration map '${node.property.key}' does not support nested keys after an entry name.`,
+					},
+				};
+			}
+
+			return {
+				matchedProperty: node.property,
+				isKnown: false,
+				isPrefix: false,
+				pathIssue: {
+					code: 'nested-key-under-scalar-property',
+					message: `Helidon configuration key '${node.property.key}' does not support nested keys.`,
+				},
+			};
+		}
+
+		return {
+			isKnown: false,
+			isPrefix: false,
+		};
+	}
+
+	return {
+		matchedProperty: node.property,
+		isKnown: node.property !== undefined,
+		isPrefix: node.children.size > 0,
+	};
+}
+
 function shouldValidateHelidonConfigKey(key: string): boolean {
 	const [root] = normalizeConfigKey(key).split('.');
 	return Boolean(root) && helidonConfigRoots.has(root);
 }
 
+export function shouldValidateKnownHelidonConfigRoot(key: string): boolean {
+	return shouldValidateHelidonConfigKey(key);
+}
+
 function isKnownHelidonConfigKey(key: string): boolean {
-	const normalizedKey = normalizeConfigKey(key);
-	return (
-		normalizedHelidonConfigKeys.has(normalizedKey) ||
-		normalizedHelidonConfigPrefixes.has(normalizedKey)
-	);
+	const resolution = resolveHelidonConfigKey(key);
+	return resolution.isKnown || resolution.isPrefix;
 }
 
 function unknownHelidonConfigDiagnostic(target: ConfigKeyDiagnosticTarget): vscode.Diagnostic {
@@ -260,7 +379,7 @@ function preferredKeyForNormalizedKey(normalizedKey: string): string | undefined
 }
 
 function propertyForNormalizedKey(key: string): HelidonConfigProperty | undefined {
-	return normalizedHelidonConfigPropertyByKey.get(normalizeConfigKey(key));
+	return resolveHelidonConfigKey(key).matchedProperty ?? normalizedHelidonConfigPropertyByKey.get(normalizeConfigKey(key));
 }
 
 function isListProperty(property: HelidonConfigProperty): boolean {
@@ -268,7 +387,7 @@ function isListProperty(property: HelidonConfigProperty): boolean {
 }
 
 function isMapProperty(property: HelidonConfigProperty): boolean {
-	return property.kind === 'MAP';
+	return property.kind === 'MAP' || property.type.startsWith('map<');
 }
 
 function isScalarProperty(property: HelidonConfigProperty): boolean {
@@ -386,37 +505,7 @@ function analyzeIndexedConfigKey(key: string): IndexedKeyAnalysis {
 }
 
 function pathValidationIssueForKey(key: string): PathValidationIssue | undefined {
-	const normalizedKey = normalizeConfigKey(key);
-	const segments = normalizedKey.split('.').filter((segment) => segment.length > 0);
-	if (segments.length < 2) {
-		return undefined;
-	}
-
-	for (let index = 1; index < segments.length; index++) {
-		const prefix = segments.slice(0, index).join('.');
-		const property = propertyForNormalizedKey(prefix);
-		if (!property) {
-			continue;
-		}
-
-		const preferredKey = preferredKeyForNormalizedKey(prefix) ?? prefix;
-		const nextSegment = segments[index];
-		if (isListProperty(property) && nextSegment !== '0') {
-			return {
-				code: 'list-property-missing-index',
-				message: `Helidon configuration list '${preferredKey}' requires an index before nested keys.`,
-			};
-		}
-
-		if (!isMapProperty(property) && !isListProperty(property) && !normalizedHelidonConfigPrefixes.has(prefix)) {
-			return {
-				code: 'nested-key-under-scalar-property',
-				message: `Helidon configuration key '${preferredKey}' does not support nested keys.`,
-			};
-		}
-	}
-
-	return undefined;
+	return resolveHelidonConfigKey(key).pathIssue;
 }
 
 function unknownKeyFromDiagnostic(diagnostic: vscode.Diagnostic): string | undefined {
@@ -440,12 +529,105 @@ function normalizedScalarValue(value: string): string {
 	return trimmed;
 }
 
+function placeholderReferences(value: string, range: vscode.Range): PlaceholderReference[] {
+	const references: PlaceholderReference[] = [];
+	const pattern = /\$\{([^}:]+?)(?::([^}]*))?\}/gu;
+	for (const match of value.matchAll(pattern)) {
+		const rawKey = match[1]?.trim();
+		const fullMatch = match[0];
+		const matchIndex = match.index ?? -1;
+		if (!rawKey || matchIndex === -1) {
+			continue;
+		}
+
+		const keyOffset = fullMatch.indexOf(rawKey);
+		if (keyOffset === -1) {
+			continue;
+		}
+
+		references.push({
+			key: rawKey,
+			range: new vscode.Range(
+				range.start.translate(0, matchIndex + keyOffset),
+				range.start.translate(0, matchIndex + keyOffset + rawKey.length)
+			),
+			defaultValue: match[2],
+		});
+	}
+
+	return references;
+}
+
+function placeholderCompletionContext(
+	document: vscode.TextDocument,
+	position: vscode.Position,
+): { prefix: string; range: vscode.Range } | undefined {
+	const line = document.lineAt(position.line).text;
+	const beforeCursor = line.slice(0, position.character);
+	const placeholderStart = beforeCursor.lastIndexOf('${');
+	if (placeholderStart === -1) {
+		return undefined;
+	}
+
+	const closingIndex = line.indexOf('}', placeholderStart + 2);
+	if (closingIndex !== -1 && closingIndex < position.character) {
+		return undefined;
+	}
+
+	const contentStart = placeholderStart + 2;
+	const defaultSeparatorIndex = line.indexOf(':', contentStart);
+	if (
+		defaultSeparatorIndex !== -1 &&
+		defaultSeparatorIndex < position.character &&
+		(closingIndex === -1 || defaultSeparatorIndex < closingIndex)
+	) {
+		return undefined;
+	}
+
+	const keyEnd =
+		closingIndex === -1
+			? position.character
+			: defaultSeparatorIndex !== -1 && defaultSeparatorIndex < closingIndex
+				? defaultSeparatorIndex
+				: closingIndex;
+	if (position.character < contentStart || position.character > keyEnd) {
+		return undefined;
+	}
+
+	return {
+		prefix: line.slice(contentStart, position.character),
+		range: new vscode.Range(position.line, contentStart, position.line, keyEnd),
+	};
+}
+
+function placeholderDiagnostics(value: string, valueRange: vscode.Range): vscode.Diagnostic[] {
+	const diagnostics: vscode.Diagnostic[] = [];
+	for (const reference of placeholderReferences(value, valueRange)) {
+		if (!shouldValidateHelidonConfigKey(reference.key)) {
+			continue;
+		}
+
+		const resolution = resolveHelidonConfigKey(reference.key);
+		if (resolution.isKnown || resolution.isPrefix) {
+			continue;
+		}
+
+		diagnostics.push(
+			resolution.pathIssue
+				? pathValidationDiagnostic(reference, resolution.pathIssue)
+				: unknownHelidonConfigDiagnostic(reference)
+		);
+	}
+
+	return diagnostics;
+}
+
 function valueValidationIssueForProperty(
 	property: HelidonConfigProperty,
 	value: string,
 ): ValueValidationIssue | undefined {
 	const normalizedValue = normalizedScalarValue(value);
-	if (normalizedValue.length === 0 || !isScalarProperty(property)) {
+	if (normalizedValue.length === 0 || !isScalarProperty(property) || normalizedValue.includes('${')) {
 		return undefined;
 	}
 
@@ -487,11 +669,7 @@ export function isHelidonYamlDocument(document: vscode.TextDocument): boolean {
 		return false;
 	}
 
-	const fileName = document.fileName.toLowerCase();
-	return (
-		fileName.endsWith('application.yaml') ||
-		fileName.endsWith('application.yml')
-	);
+	return HELIDON_APPLICATION_YAML_PATTERN.test(document.fileName);
 }
 
 function yamlIndent(text: string): number {
@@ -899,7 +1077,52 @@ function yamlCompletionItems(document: vscode.TextDocument, position: vscode.Pos
 	});
 }
 
+function isIntermediateSyntheticKey(property: HelidonConfigProperty): boolean {
+	return (
+		(property.key.endsWith('.0') || property.key.endsWith('.*')) &&
+		HELIDON_CONFIG_PROPERTIES.some((candidate) => candidate.key.startsWith(`${property.key}.`))
+	);
+}
+
+function helidonConfigCompletionItems(
+	prefix: string,
+	range: vscode.Range | undefined,
+	itemLabel: (property: HelidonConfigProperty) => string = (property) => property.key,
+	itemDetail: (property: HelidonConfigProperty) => string = (property) => `Helidon configuration (${property.type})`,
+): vscode.CompletionItem[] {
+	return HELIDON_CONFIG_PROPERTIES
+		.filter((property) => !isIntermediateSyntheticKey(property))
+		.filter((property) => {
+			if (property.key.includes('.*')) {
+				return false;
+			}
+
+			return prefix.length === 0 || property.key.startsWith(prefix);
+		})
+		.map((property) => {
+			const label = itemLabel(property);
+			const item = new vscode.CompletionItem(label, vscode.CompletionItemKind.Property);
+			item.detail = itemDetail(property);
+			item.documentation = propertyMarkdown(property);
+			item.insertText = label;
+			item.sortText = property.key;
+			if (range) {
+				item.range = range;
+			}
+			return item;
+		});
+}
+
 function hoverForYaml(document: vscode.TextDocument, position: vscode.Position): vscode.Hover | undefined {
+	const placeholderContext = placeholderCompletionContext(document, position);
+	if (placeholderContext) {
+		const placeholderKey = document.getText(placeholderContext.range);
+		const property = findHelidonConfigProperty(placeholderKey);
+		if (property) {
+			return new vscode.Hover(propertyMarkdown(property), placeholderContext.range);
+		}
+	}
+
 	const keyRange = document.getWordRangeAtPosition(position, YAML_KEY_SEGMENT_PATTERN);
 	if (!keyRange) {
 		return undefined;
@@ -921,11 +1144,7 @@ function hoverForYaml(document: vscode.TextDocument, position: vscode.Position):
 }
 
 export function isHelidonPropertiesDocument(document: vscode.TextDocument): boolean {
-	const fileName = document.fileName.toLowerCase();
-	return (
-		fileName.endsWith('application.properties') ||
-		fileName.endsWith('microprofile-config.properties')
-	);
+	return HELIDON_APPLICATION_PROPERTIES_PATTERN.test(document.fileName);
 }
 
 export function collectHelidonPropertiesDiagnostics(document: vscode.TextDocument): vscode.Diagnostic[] {
@@ -980,6 +1199,7 @@ export function collectHelidonPropertiesDiagnostics(document: vscode.TextDocumen
 			continue;
 		}
 
+		diagnostics.push(...placeholderDiagnostics(value, valueRange));
 		const valueIssue = valueValidationIssueForProperty(property, value);
 		if (valueIssue) {
 			diagnostics.push(valueValidationDiagnostic(valueRange, valueIssue));
@@ -1013,6 +1233,7 @@ export function collectHelidonYamlDiagnostics(document: vscode.TextDocument): vs
 			continue;
 		}
 
+		diagnostics.push(...placeholderDiagnostics(entry.value, entry.valueRange));
 		const valueIssue = valueValidationIssueForProperty(property, entry.value);
 		if (valueIssue) {
 			diagnostics.push(valueValidationDiagnostic(entry.valueRange, valueIssue));
@@ -1029,6 +1250,27 @@ export function collectHelidonDiagnostics(document: vscode.TextDocument): vscode
 
 	if (isHelidonYamlDocument(document)) {
 		return collectHelidonYamlDiagnostics(document);
+	}
+
+	return [];
+}
+
+export function findHelidonConfigKeyRanges(document: vscode.TextDocument, key: string): vscode.Range[] {
+	if (isHelidonPropertiesDocument(document)) {
+		const ranges: vscode.Range[] = [];
+		for (let lineIndex = 0; lineIndex < document.lineCount; lineIndex++) {
+			const assignment = parsePropertiesAssignment(document, lineIndex);
+			if (assignment && assignment.key === key) {
+				ranges.push(assignment.keyRange);
+			}
+		}
+		return ranges;
+	}
+
+	if (isHelidonYamlDocument(document)) {
+		return yamlKeyEntries(document)
+			.filter((entry) => entry.key === key)
+			.map((entry) => entry.range);
 	}
 
 	return [];
@@ -1066,6 +1308,16 @@ export class HelidonPropertiesCompletionProvider implements vscode.CompletionIte
 		const line = document.lineAt(position).text;
 		const beforeCursor = line.slice(0, position.character);
 
+		const placeholderContext = placeholderCompletionContext(document, position);
+		if (placeholderContext) {
+			return helidonConfigCompletionItems(
+				placeholderContext.prefix,
+				placeholderContext.range,
+				(property) => property.key,
+				(property) => `Helidon placeholder (${property.type})`
+			);
+		}
+
 		if (beforeCursor.trimStart().startsWith('#') || beforeCursor.includes('=')) {
 			return undefined;
 		}
@@ -1073,19 +1325,7 @@ export class HelidonPropertiesCompletionProvider implements vscode.CompletionIte
 		const keyRange = document.getWordRangeAtPosition(position, /[A-Za-z0-9._-]+/);
 		const currentPrefix = keyRange ? document.getText(keyRange) : beforeCursor.trim();
 
-		return HELIDON_CONFIG_PROPERTIES
-			.filter((property) => currentPrefix.length === 0 || property.key.startsWith(currentPrefix))
-			.map((property) => {
-				const item = new vscode.CompletionItem(property.key, vscode.CompletionItemKind.Property);
-				item.detail = `Helidon configuration (${property.type})`;
-				item.documentation = propertyMarkdown(property);
-				item.insertText = property.key;
-				item.sortText = property.key;
-				if (keyRange) {
-					item.range = keyRange;
-				}
-				return item;
-			});
+		return helidonConfigCompletionItems(currentPrefix, keyRange);
 	}
 }
 
@@ -1096,6 +1336,16 @@ export class HelidonYamlCompletionProvider implements vscode.CompletionItemProvi
 	): vscode.ProviderResult<vscode.CompletionItem[]> {
 		if (!isHelidonYamlDocument(document)) {
 			return undefined;
+		}
+
+		const placeholderContext = placeholderCompletionContext(document, position);
+		if (placeholderContext) {
+			return helidonConfigCompletionItems(
+				placeholderContext.prefix,
+				placeholderContext.range,
+				(property) => property.key,
+				(property) => `Helidon placeholder (${property.type})`
+			);
 		}
 
 		return yamlCompletionItems(document, position);
@@ -1113,6 +1363,15 @@ export class HelidonPropertiesHoverProvider implements vscode.HoverProvider {
 
 		if (!isHelidonPropertiesDocument(document)) {
 			return undefined;
+		}
+
+		const placeholderContext = placeholderCompletionContext(document, position);
+		if (placeholderContext) {
+			const placeholderKey = document.getText(placeholderContext.range);
+			const property = findHelidonConfigProperty(placeholderKey);
+			if (property) {
+				return new vscode.Hover(propertyMarkdown(property), placeholderContext.range);
+			}
 		}
 
 		const keyRange = document.getWordRangeAtPosition(position, /[A-Za-z0-9._-]+/);

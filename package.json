@@ -13,9 +13,11 @@
   "activationEvents": [
     "onLanguage:properties",
     "onLanguage:java-properties",
+    "onLanguage:java",
     "onLanguage:yaml",
     "onView:helidonEndpoints",
     "onCommand:helidon-vsc.generateProject",
+    "onCommand:helidon-vsc.generateRunFiles",
     "onCommand:helidon-vsc.refreshEndpoints",
     "onCommand:helidon-vsc.reloadExtension"
   ],
@@ -28,6 +30,10 @@
       {
         "command": "helidon-vsc.generateProject",
         "title": "Helidon: Generate Project"
+      },
+      {
+        "command": "helidon-vsc.generateRunFiles",
+        "title": "Helidon: Generate Run Files"
       },
       {
         "command": "helidon-vsc.refreshEndpoints",

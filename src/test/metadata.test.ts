@@ -47,4 +47,50 @@ suite('Metadata Parser Test Suite', () => {
 		assert.ok(metadata.some((property) => property.key === 'server.port'));
 		assert.ok(metadata.some((property) => property.key === 'server.shutdown-hook'));
 	});
+
+	test('parser emits synthetic indexed and map entry keys for nested config types', () => {
+		const metadata = parseHelidonConfigMetadata(
+			JSON.stringify([
+				{
+					module: 'io.helidon.example',
+					types: [
+						{
+							type: 'example.LoggerConfig',
+							options: [
+								{
+									key: 'name',
+									type: 'java.lang.String',
+									description: 'Logger name',
+								},
+							],
+						},
+						{
+							type: 'example.RootConfig',
+							standalone: true,
+							prefix: 'example',
+							options: [
+								{
+									key: 'loggers',
+									type: 'example.LoggerConfig',
+									kind: 'LIST',
+									description: 'Logger list',
+								},
+								{
+									key: 'labels',
+									kind: 'MAP',
+									method: 'example.RootConfig.Builder#labels(java.util.Map<java.lang.String, java.lang.String>)',
+									description: 'Label map',
+								},
+							],
+						},
+					],
+				},
+			])
+		);
+
+		assert.ok(metadata.some((property) => property.key === 'example.loggers'));
+		assert.ok(metadata.some((property) => property.key === 'example.loggers.0'));
+		assert.ok(metadata.some((property) => property.key === 'example.loggers.0.name'));
+		assert.ok(metadata.some((property) => property.key === 'example.labels.*'));
+	});
 });

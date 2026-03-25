@@ -263,6 +263,73 @@ Important scope note:
 - current coverage is JAX-RS-style resources, which works well for the demo project
 - Helidon routing builder APIs, path-variable reference handling, and endpoint inlay hints are still not implemented
 
+### 15. Metadata/model parity pass for nested list/map config shapes
+Implemented a deeper metadata flattening/model pass inspired by the IntelliJ builder:
+- metadata flattening no longer treats every `LIST` / `MAP` option as a terminal leaf
+- synthetic indexed/map-entry keys are emitted for nested config shapes
+  - list example shape: `security.providers.0.oidc.client-id`
+  - map example shape: `example.labels.*`
+- method signatures such as `Map<String, String>` are used when metadata omits explicit `type`
+- config lookup now uses a lightweight schema tree rather than only flat-key sets
+
+Important scope note:
+- this improves list/map-aware validation and navigation, but it is still a TypeScript-side model, not IntelliJ’s full `MetaConfigKey` tree
+- map-entry handling is intentionally conservative; arbitrary nested map-of-POJO/path semantics may still need refinement on real projects
+
+### 16. Config reference/value intelligence pass
+Implemented the first meaningful VS Code equivalent of the IntelliJ reference layer:
+- support expanded from only `application.properties` / `application.yaml` to environment-specific Helidon config files:
+  - `application-*.properties`
+  - `application-*.yaml`
+  - `application-*.yml`
+- placeholder intelligence in config values:
+  - completion inside `${...}`
+  - hover inside `${...}`
+  - diagnostics for invalid Helidon placeholder keys under known Helidon roots
+  - go-to-definition from `${some.key}` to matching config entries in workspace Helidon config files
+- value validation now skips placeholder-backed scalar values to avoid false positives during unresolved placeholder use
+
+Important scope note:
+- placeholder validation is currently key-oriented, not full value-resolution semantics
+- system properties/env placeholders/default-value semantics are not deeply validated yet
+- duplicate `.properties` key inspection still does not exist
+
+### 17. Java-side Helidon config support pass
+Implemented the first Java-aware Helidon support in VS Code:
+- Java activation added for the extension
+- detection of Helidon `Config.get("...")` string literals
+- Java completion for config keys inside `Config.get("...")`
+- Java hover for known Helidon config keys used in `Config.get("...")`
+- Java diagnostics for invalid Helidon config keys used in `Config.get("...")`
+- go-to-definition from Java `Config.get("...")` keys to matching config entries in workspace Helidon config files
+
+Implementation files:
+- `src/javaConfig.ts`
+
+Important scope note:
+- this is source-pattern-based detection, not semantic Java symbol resolution
+- current matching centers on `Config.get("...")` string literals; broader Java-side APIs may still be missing
+
+### 18. Endpoint/routing/run-helper parity pass
+Implemented the first substantial parity move beyond JAX-RS-only endpoint support:
+- endpoint discovery now also scans common Helidon routing/service patterns:
+  - `rules.get(...)`
+  - `routing.post(...)`
+  - `register("/base", new SomeService())`
+- service registrations are combined with discovered service-local routes to form full endpoint paths
+- endpoint code lenses were added in Java editors as the VS Code equivalent of IntelliJ’s endpoint inlay affordances
+- basic path-variable navigation was added for common request accessor patterns such as `.param("name")`
+- a new helper command was added:
+  - `Helidon: Generate Run Files`
+- run-file generation creates or updates:
+  - `.vscode/tasks.json`
+  - `.vscode/launch.json`
+
+Important scope note:
+- routing discovery is still source-based and conservative
+- service registration resolution is strongest when the code uses direct `new SomeService(...)` patterns
+- the run/bootstrap helper is the VS Code analogue of the IntelliJ run configuration bootstrap, not a full project wizard replacement
+
 ---
 
 ## Commits created so far
@@ -398,22 +465,26 @@ Current VS Code parity status against the JetBrains plugin:
   - indexed properties-key syntax diagnostics
   - scalar/list path-shape diagnostics
   - basic value-level validation for boolean and integer-like scalar properties
+  - placeholder key validation/completion/navigation in config values
   - duplicate YAML key diagnostics
   - basic quick fixes/code actions for typo corrections, indexed-key fixes, and duplicate YAML key removal
+  - Java-side config key references/navigation for `Config.get("...")`
   - endpoint discovery/display/navigation for JAX-RS resources
+  - broader endpoint discovery for common Helidon routing/service patterns
+  - endpoint code-lens-style affordances
+  - basic endpoint path-variable navigation
   - project generation command
   - metadata loading from `META-INF/helidon/config-metadata.json`
+  - optional run/debug bootstrap helper generation
+  - richer nested list/map metadata modeling
 
 - still missing:
-  - unresolved map/path validation
-  - value/reference validation
+  - unresolved map/path validation beyond the current conservative schema handling
+  - richer value/reference validation (enums, classes, packages, durations, sizes, etc.)
   - duplicate `.properties` key handling (if desired)
   - richer code actions for the remaining inspections
-  - Java-side config key references/navigation
-  - endpoint inlay/code-lens-style affordances
-  - broader endpoint discovery beyond JAX-RS (e.g. routing builder patterns)
   - richer project wizard parity
-  - run/debug bootstrap parity
+  - deeper run/debug/bootstrap parity
 
 #### Important JetBrains comparison note
 The JetBrains plugin does **not** appear to expose any equivalent to the removed VS Code testing command `Helidon: Trigger Config Completion`.
@@ -434,44 +505,55 @@ So for the next conversation, do **not** center the work around a deeper JDT LS 
 
 ### Implemented
 - [x] `application.properties` completion
+- [x] `application-*.properties` completion
 - [x] `microprofile-config.properties` completion
 - [x] `application.properties` hover
+- [x] `application-*.properties` hover
 - [x] `microprofile-config.properties` hover
 - [x] `application.yaml` / `application.yml` completion
+- [x] `application-*.yaml` / `application-*.yml` completion
 - [x] `application.yaml` / `application.yml` hover
+- [x] `application-*.yaml` / `application-*.yml` hover
 - [x] conservative diagnostics for unknown Helidon keys in supported properties/YAML files
 - [x] indexed properties-key syntax diagnostics (`[]`, missing `]`, non-integer index)
 - [x] scalar nested-path diagnostics for unsupported child keys under leaf properties
 - [x] list missing-index diagnostics for list-backed properties
 - [x] value-level validation for boolean, integer, and long-backed scalar properties
+- [x] placeholder diagnostics/completion/hover/navigation in Helidon config values
 - [x] duplicate YAML key diagnostics
 - [x] typo-correction quick fixes for strong unknown-key matches
 - [x] malformed indexed-key quick fixes
 - [x] duplicate YAML key removal quick fixes
 - [x] endpoint discovery/display/navigation for JAX-RS Java resources
+- [x] endpoint discovery/display/navigation for common Helidon routing/service Java patterns
 - [x] Explorer tree view for Helidon endpoints
 - [x] navigation from endpoint entries to Java source
+- [x] endpoint code lenses in Java editors
+- [x] basic path-variable navigation for common Helidon request path accessors
 - [x] structured metadata parser inspired by IntelliJ plugin
+- [x] nested list/map metadata flattening for indexed/map entry shapes
 - [x] Java classpath metadata loading via `redhat.java`
 - [x] parser compatibility with real Helidon 4 metadata
 - [x] startup retry logic while Java import/classpath resolution finishes
 - [x] activation for `java-properties` Helidon config files
+- [x] activation for Java source files
+- [x] Java-side `Config.get("...")` completion / hover / diagnostics / navigation
 - [x] runtime debug output channel
 - [x] `Helidon: Reload Extension` debug command
 - [x] example/demo project
 - [x] Helidon project generation command using archetypes
+- [x] optional `.vscode/launch.json` / `.vscode/tasks.json` helper generation
 
 ### Not implemented yet
 - [ ] duplicate `.properties` key diagnostics, if product direction wants them
 - [ ] richer code actions for path-shape and value-level diagnostics
-- [ ] Java-side Helidon references / navigation
-- [ ] value/reference intelligence for config values and placeholders
-- [ ] broader endpoint discovery for non-JAX-RS Helidon patterns
-- [ ] endpoint path-variable references / navigation
-- [ ] endpoint inlay/code-lens-style affordances
+- [ ] broader Java-side Helidon config API coverage beyond current `Config.get("...")` support
+- [ ] richer value/reference intelligence for config values and placeholders
+- [ ] endpoint discovery for additional/non-common Helidon patterns beyond the current conservative routing scan
+- [ ] richer path-variable semantics/navigation beyond the current basic accessor matching
+- [ ] richer endpoint inlay/code-lens UX if needed
 - [ ] richer project wizard parity
-- [ ] run/debug bootstrap helpers
-- [ ] optional `.vscode/` helper generation command
+- [ ] richer run/debug/bootstrap parity beyond generated VS Code helpers
 - [ ] deeper Java LS plugin integration (deferred)
 
 ---
@@ -481,30 +563,34 @@ Suggested next priorities for the new conversation:
 1. **Remaining richer inspections** for properties and YAML:
    - decide whether duplicate `.properties` keys should warn at all
    - expand value validation only where metadata makes it reliable enough
-   - consider duration/size/enum-like validation only if false positives can be avoided
+   - consider duration/size/enum/class/package validation only if false positives can be avoided
+   - improve map-entry/path validation on real-world Helidon metadata
 2. **Richer code actions** for new inspections where safe:
    - follow-on fixes for scalar/list path-shape issues
    - any safe value-level correction or normalization helpers
+   - possible placeholder/config-key navigation helpers where VS Code UX supports them
 3. **Endpoint support expansion**:
-   - discover non-JAX-RS Helidon routes/endpoints from Java
-   - add path-variable awareness and richer endpoint metadata
-   - consider code-lens/inlay affordances if they add real value
+   - expand routing discovery for less-common Helidon patterns
+   - improve path-variable awareness and richer endpoint metadata
+   - decide whether current code-lens UX is enough or should be refined further
 4. **Java-side Helidon features**:
-   - detect Helidon config key literals in Java
-   - navigate between Java usage and config definitions where feasible
-   - later consider diagnostics on invalid Java-side config key literals
+   - expand beyond current `Config.get("...")` support to other Helidon config access patterns
+   - refine navigation between Java usage and config definitions
+   - consider diagnostics on invalid Java-side config key literals for broader APIs
 5. **Value/reference intelligence**:
    - stronger value completion/validation
-   - placeholder/reference validation
+   - deeper placeholder/reference validation
    - list/map-aware handling
+   - possibly enum/class/package-aware suggestions inspired by IntelliJ hints
 6. **Project generation parity**:
    - Gradle support
    - Java/Kotlin selection
    - richer starter/template choices
 7. **Run/debug bootstrap**:
-   - optional `.vscode/launch.json`
-   - optional `.vscode/tasks.json`
-   - helper run command if useful
+   - improve generated `.vscode/launch.json`
+   - improve generated `.vscode/tasks.json`
+   - detect better default main classes / launch strategies on real projects
+   - helper run/debug commands if useful
 8. Only later: **same Java language server integration** as a final refactor
 
 If inspections are tackled, be conservative because missing classpath metadata can still create false positives or false negatives during workspace startup.
@@ -517,23 +603,32 @@ If inspections are tackled, be conservative because missing classpath metadata c
 3. In Extension Development Host, open `/home/jbescos/workspace/demo-helidon` or `/home/jbescos/workspace/helidon-vsc-example`
 4. Test:
    - `application.properties`
+   - `application-dev.properties`
    - malformed indexed properties keys such as `logging.loggers[].name=value`
    - scalar nested paths such as `server.port.value=8080`
    - list-backed paths without an index such as `logging.loggers.name=demo`
    - invalid scalar values such as `metrics.enabled=maybe` or `server.port=eighty`
+   - placeholder keys such as `server.port=${server.prt}`
    - unknown-key typo quick fix such as `server.prt`
    - `src/main/resources/META-INF/microprofile-config.properties` in generated MP projects
    - `application.yaml`
+   - `application-prod.yaml`
    - duplicate YAML keys in the same mapping
    - scalar nested YAML paths such as `server: { port: { value: 8080 } }`
    - list-backed YAML mappings without a list item under `logging.loggers`
    - invalid YAML scalar values such as `metrics.enabled: maybe`
+   - YAML placeholder values such as `server: { port: ${server.prt} }`
    - duplicate YAML key quick fix
+   - Java `Config.get("server.port")` completion / hover / navigation / invalid-key diagnostics
    - Explorer view → `Helidon Endpoints`
    - click an endpoint entry and confirm it opens the Java method
+   - verify routing/service endpoints, not only JAX-RS endpoints
+   - verify Java endpoint code lenses appear and open the corresponding method
+   - verify common path-parameter usages such as `.param("name")` navigate back to a matching route pattern
    - output panel → `Helidon`
    - command palette → `Helidon: Refresh Endpoints`
    - command palette → `Helidon: Generate Project`
+   - command palette → `Helidon: Generate Run Files`
    - command palette → `Helidon: Reload Extension` (debug only)
 
 ---
@@ -541,6 +636,8 @@ If inspections are tackled, be conservative because missing classpath metadata c
 ## Current important source files in `helidon-vsc`
 - `src/extension.ts`
 - `src/helidonConfig.ts`
+- `src/javaConfig.ts`
+- `src/endpoints.ts`
 - `src/javaMetadata.ts`
 - `src/metadata.ts`
 - `src/generator.ts`

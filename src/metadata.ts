@@ -5,6 +5,8 @@ export interface HelidonConfigProperty {
 	defaultValue?: string;
 	description: string;
 	example?: string;
+	method?: string;
+	deprecated?: boolean;
 }
 
 interface HelidonMetadataModule {
@@ -28,6 +30,105 @@ interface HelidonMetadataOption {
 	method?: string;
 	deprecated?: boolean;
 	defaultValue?: string;
+}
+
+function isJavaLeafType(typeName: string): boolean {
+	return typeName === 'unknown' || typeName.startsWith('java.');
+}
+
+function splitTopLevelGenericArguments(value: string): string[] {
+	const parts: string[] = [];
+	let current = '';
+	let depth = 0;
+
+	for (const character of value) {
+		if (character === '<') {
+			depth += 1;
+			current += character;
+			continue;
+		}
+
+		if (character === '>') {
+			depth = Math.max(0, depth - 1);
+			current += character;
+			continue;
+		}
+
+		if (character === ',' && depth === 0) {
+			parts.push(current.trim());
+			current = '';
+			continue;
+		}
+
+		current += character;
+	}
+
+	if (current.trim().length > 0) {
+		parts.push(current.trim());
+	}
+
+	return parts;
+}
+
+function genericTypeArguments(typeText: string): string[] {
+	const start = typeText.indexOf('<');
+	const end = typeText.lastIndexOf('>');
+	if (start === -1 || end === -1 || end <= start + 1) {
+		return [];
+	}
+
+	return splitTopLevelGenericArguments(typeText.slice(start + 1, end));
+}
+
+function valueTypeFromMethod(option: HelidonMetadataOption): string | undefined {
+	if (!option.method) {
+		return undefined;
+	}
+
+	const signatureStart = option.method.indexOf('(');
+	const signatureEnd = option.method.lastIndexOf(')');
+	if (signatureStart === -1 || signatureEnd === -1 || signatureEnd <= signatureStart + 1) {
+		return undefined;
+	}
+
+	const parameters = splitTopLevelGenericArguments(option.method.slice(signatureStart + 1, signatureEnd));
+	if (parameters.length === 0) {
+		return undefined;
+	}
+
+	const firstParameter = parameters[0];
+	if (option.kind === 'LIST') {
+		return genericTypeArguments(firstParameter)[0];
+	}
+
+	if (option.kind === 'MAP') {
+		return genericTypeArguments(firstParameter)[1];
+	}
+
+	return undefined;
+}
+
+function effectiveOptionValueType(option: HelidonMetadataOption): string {
+	return option.type ?? valueTypeFromMethod(option) ?? 'unknown';
+}
+
+function addLeafProperty(
+	properties: HelidonConfigProperty[],
+	key: string,
+	type: string,
+	kind: 'VALUE' | 'LIST' | 'MAP',
+	option: HelidonMetadataOption,
+): void {
+	properties.push({
+		key,
+		type,
+		kind,
+		defaultValue: option.defaultValue,
+		description: option.description ?? '',
+		example: option.defaultValue,
+		method: option.method,
+		deprecated: option.deprecated,
+	});
 }
 
 function flattenType(
@@ -58,21 +159,38 @@ function flattenType(
 		}
 
 		const key = prefix ? `${prefix}.${option.key}` : option.key;
-		const optionType = option.type ?? 'unknown';
 		const optionKind = option.kind ?? 'VALUE';
-		const nestedType = option.type ? metadataTypes.get(option.type) : undefined;
-		const isLeaf =
-			!nestedType || optionKind === 'LIST' || optionKind === 'MAP' || optionType.startsWith('java.');
+		const optionValueType = effectiveOptionValueType(option);
+		const nestedType = metadataTypes.get(optionValueType);
+		const isLeaf = !nestedType || isJavaLeafType(optionValueType);
+		const optionType =
+			optionKind === 'LIST'
+				? `list<${optionValueType}>`
+				: optionKind === 'MAP'
+					? `map<${optionValueType}>`
+					: optionValueType;
+
+		addLeafProperty(properties, key, optionType, optionKind, option);
 
 		if (isLeaf) {
-			properties.push({
-				key,
-				type: optionKind === 'LIST' ? `list<${optionType}>` : optionType,
-				kind: optionKind,
-				defaultValue: option.defaultValue,
-				description: option.description ?? '',
-				example: option.defaultValue,
-			});
+			if (optionKind === 'LIST') {
+				addLeafProperty(properties, `${key}.0`, optionValueType, 'VALUE', option);
+			}
+			if (optionKind === 'MAP') {
+				addLeafProperty(properties, `${key}.*`, optionValueType, 'VALUE', option);
+			}
+			continue;
+		}
+
+		if (optionKind === 'LIST') {
+			addLeafProperty(properties, `${key}.0`, optionValueType, 'VALUE', option);
+			properties.push(...flattenType(nestedType, metadataTypes, `${key}.0`, new Set(visited)));
+			continue;
+		}
+
+		if (optionKind === 'MAP') {
+			addLeafProperty(properties, `${key}.*`, optionValueType, 'VALUE', option);
+			properties.push(...flattenType(nestedType, metadataTypes, `${key}.*`, new Set(visited)));
 			continue;
 		}
 

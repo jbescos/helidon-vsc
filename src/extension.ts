@@ -1,4 +1,8 @@
-import { HelidonEndpointsTreeDataProvider } from './endpoints';
+import {
+	HelidonEndpointCodeLensProvider,
+	HelidonEndpointsTreeDataProvider,
+	HelidonPathParameterDefinitionProvider,
+} from './endpoints';
 import * as vscode from 'vscode';
 import {
 	collectHelidonDiagnostics,
@@ -8,7 +12,14 @@ import {
 	HelidonYamlCompletionProvider,
 	replaceHelidonConfigProperties,
 } from './helidonConfig';
-import { generateHelidonProject } from './generator';
+import { generateHelidonProject, generateHelidonRunFiles } from './generator';
+import {
+	collectHelidonJavaDiagnostics,
+	HelidonConfigPlaceholderDefinitionProvider,
+	HelidonJavaConfigCompletionProvider,
+	HelidonJavaConfigDefinitionProvider,
+	HelidonJavaConfigHoverProvider,
+} from './javaConfig';
 import {
 	hasJavaExtensionInstalled,
 	getJavaExtensionApi,
@@ -35,26 +46,34 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const completionProvider = vscode.languages.registerCompletionItemProvider(
 		[
-			{ scheme: 'file', pattern: '**/application.properties' },
+			{ scheme: 'file', pattern: '**/application*.properties' },
 			{ scheme: 'file', pattern: '**/microprofile-config.properties' },
-			{ scheme: 'untitled', pattern: '**/application.properties' },
+			{ scheme: 'untitled', pattern: '**/application*.properties' },
 			{ scheme: 'untitled', pattern: '**/microprofile-config.properties' },
 		],
 		new HelidonPropertiesCompletionProvider(),
-		'.'
+		'.',
+		'$'
 	);
 
 	const yamlCompletionProvider = vscode.languages.registerCompletionItemProvider(
 		[{ language: 'yaml', scheme: 'file' }, { language: 'yaml', scheme: 'untitled' }],
 		new HelidonYamlCompletionProvider(),
-		'.'
+		'.',
+		'$'
+	);
+
+	const javaCompletionProvider = vscode.languages.registerCompletionItemProvider(
+		[{ language: 'java', scheme: 'file' }, { language: 'java', scheme: 'untitled' }],
+		new HelidonJavaConfigCompletionProvider(),
+		'"'
 	);
 
 	const hoverProvider = vscode.languages.registerHoverProvider(
 		[
-			{ scheme: 'file', pattern: '**/application.properties' },
+			{ scheme: 'file', pattern: '**/application*.properties' },
 			{ scheme: 'file', pattern: '**/microprofile-config.properties' },
-			{ scheme: 'untitled', pattern: '**/application.properties' },
+			{ scheme: 'untitled', pattern: '**/application*.properties' },
 			{ scheme: 'untitled', pattern: '**/microprofile-config.properties' },
 			{ language: 'yaml', scheme: 'file' },
 			{ language: 'yaml', scheme: 'untitled' },
@@ -62,11 +81,43 @@ export function activate(context: vscode.ExtensionContext) {
 		new HelidonPropertiesHoverProvider()
 	);
 
+	const javaHoverProvider = vscode.languages.registerHoverProvider(
+		[{ language: 'java', scheme: 'file' }, { language: 'java', scheme: 'untitled' }],
+		new HelidonJavaConfigHoverProvider()
+	);
+
+	const placeholderDefinitionProvider = vscode.languages.registerDefinitionProvider(
+		[
+			{ scheme: 'file', pattern: '**/application*.properties' },
+			{ scheme: 'file', pattern: '**/microprofile-config.properties' },
+			{ scheme: 'untitled', pattern: '**/application*.properties' },
+			{ scheme: 'untitled', pattern: '**/microprofile-config.properties' },
+			{ language: 'yaml', scheme: 'file' },
+			{ language: 'yaml', scheme: 'untitled' },
+		],
+		new HelidonConfigPlaceholderDefinitionProvider()
+	);
+
+	const javaDefinitionProvider = vscode.languages.registerDefinitionProvider(
+		[{ language: 'java', scheme: 'file' }, { language: 'java', scheme: 'untitled' }],
+		new HelidonJavaConfigDefinitionProvider()
+	);
+
+	const endpointCodeLensProvider = vscode.languages.registerCodeLensProvider(
+		[{ language: 'java', scheme: 'file' }, { language: 'java', scheme: 'untitled' }],
+		new HelidonEndpointCodeLensProvider(endpointsProvider)
+	);
+
+	const pathParameterDefinitionProvider = vscode.languages.registerDefinitionProvider(
+		[{ language: 'java', scheme: 'file' }, { language: 'java', scheme: 'untitled' }],
+		new HelidonPathParameterDefinitionProvider(endpointsProvider)
+	);
+
 	const codeActionProvider = vscode.languages.registerCodeActionsProvider(
 		[
-			{ scheme: 'file', pattern: '**/application.properties' },
+			{ scheme: 'file', pattern: '**/application*.properties' },
 			{ scheme: 'file', pattern: '**/microprofile-config.properties' },
-			{ scheme: 'untitled', pattern: '**/application.properties' },
+			{ scheme: 'untitled', pattern: '**/application*.properties' },
 			{ scheme: 'untitled', pattern: '**/microprofile-config.properties' },
 			{ language: 'yaml', scheme: 'file' },
 			{ language: 'yaml', scheme: 'untitled' },
@@ -79,6 +130,10 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const generateProjectCommand = vscode.commands.registerCommand('helidon-vsc.generateProject', async () => {
 		await generateHelidonProject();
+	});
+
+	const generateRunFilesCommand = vscode.commands.registerCommand('helidon-vsc.generateRunFiles', async () => {
+		await generateHelidonRunFiles();
 	});
 
 	const reloadExtensionCommand = vscode.commands.registerCommand('helidon-vsc.reloadExtension', async () => {
@@ -114,7 +169,7 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	const refreshDiagnostics = (document: vscode.TextDocument) => {
-		const issues = collectHelidonDiagnostics(document);
+		const issues = [...collectHelidonDiagnostics(document), ...collectHelidonJavaDiagnostics(document)];
 		if (issues.length === 0) {
 			diagnostics.delete(document.uri);
 			return;
@@ -280,9 +335,16 @@ export function activate(context: vscode.ExtensionContext) {
 		new vscode.Disposable(clearMetadataRetry),
 		completionProvider,
 		yamlCompletionProvider,
+		javaCompletionProvider,
 		hoverProvider,
+		javaHoverProvider,
+		placeholderDefinitionProvider,
+		javaDefinitionProvider,
+		endpointCodeLensProvider,
+		pathParameterDefinitionProvider,
 		codeActionProvider,
 		generateProjectCommand,
+		generateRunFilesCommand,
 		reloadExtensionCommand,
 		openEndpointCommand,
 		refreshEndpointsCommand,

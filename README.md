@@ -4,25 +4,28 @@ VS Code extension for Helidon that will grow into framework tooling comparable t
 
 ## Features
 
-Current MVP feature:
+Current feature set:
 
-- Helidon configuration completion in `application.properties` / `microprofile-config.properties`
-- Helidon configuration completion in `application.yaml` / `application.yml`
-- Hover documentation for known Helidon properties in `application.properties` / `microprofile-config.properties`
-- Hover documentation for known Helidon properties in `application.yaml` / `application.yml`
-- Conservative diagnostics for unknown Helidon configuration keys in `application.properties` / `microprofile-config.properties`
-- Conservative diagnostics for unknown Helidon configuration keys in `application.yaml` / `application.yml`
+- Helidon configuration completion in `application.properties`, `application-*.properties`, and `microprofile-config.properties`
+- Helidon configuration completion in `application.yaml`, `application.yml`, and `application-*.ya?ml`
+- Hover documentation for known Helidon properties in Helidon properties/YAML config files
+- Conservative diagnostics for unknown Helidon configuration keys in Helidon properties/YAML config files
 - Indexed-key syntax diagnostics in `application.properties` / `microprofile-config.properties`
 - Nested-path diagnostics for scalar Helidon properties
 - Missing-list-index diagnostics for list-backed Helidon properties
 - Value-level diagnostics for boolean and integer-like Helidon properties
+- Placeholder key diagnostics, completion, hover, and go-to-definition for `${...}` references in Helidon config values
 - Duplicate YAML key diagnostics in `application.yaml` / `application.yml`
 - Quick fixes for unknown-key typos when a strong Helidon metadata match exists
 - Quick fixes for malformed indexed properties keys
 - Quick fixes to remove duplicate YAML keys
-- Explorer view for Helidon endpoints discovered from JAX-RS Java resources
+- Java completion, hover, diagnostics, and go-to-definition for Helidon `Config.get("...")` keys
+- Explorer view for Helidon endpoints discovered from JAX-RS resources and Helidon routing/service patterns
+- Java code lenses for discovered endpoints
+- Path-parameter go-to-definition for common Helidon request path accessor usages
 - Click-through navigation from endpoint entries back to Java source methods
 - Helidon project generation command using Helidon Maven archetypes
+- `Helidon: Generate Run Files` to create `.vscode/launch.json` and `.vscode/tasks.json` entries for an opened Helidon project
 
 When editing an `application.properties` or `microprofile-config.properties` file, typing prefixes like `server.` will offer Helidon configuration keys such as:
 
@@ -64,6 +67,7 @@ Diagnostics currently cover:
 - nested keys under scalar Helidon properties such as `server.port.value`
 - missing indexes before nested list-backed keys such as `logging.loggers.name`
 - invalid values for known boolean, integer, and long-backed properties such as `metrics.enabled=maybe` or `server.port=eighty`
+- invalid placeholder keys under known Helidon config roots such as `${server.prt}`
 - duplicate YAML keys within the same mapping
 
 Quick fixes currently cover:
@@ -81,14 +85,18 @@ The extension now contributes a **Helidon Endpoints** view in the Explorer.
 Current endpoint support:
 
 - scans workspace Java files for JAX-RS resources using class-level and method-level `@Path`
-- detects HTTP methods from `@GET`, `@POST`, `@PUT`, `@DELETE`, `@PATCH`, `@HEAD`, and `@OPTIONS`
-- groups endpoints by resource class
+- scans Helidon routing builder and service-style route declarations such as `rules.get(...)`, `routing.post(...)`, and `routing.register("/base", new Service())`
+- detects HTTP methods from `@GET`, `@POST`, `@PUT`, `@DELETE`, `@PATCH`, `@HEAD`, `@OPTIONS`, and Helidon routing methods including `TRACE`
+- groups endpoints by resource/service class
 - opens the corresponding Java method when you click an endpoint entry
+- adds Java code lenses such as `GET /greet/{name}` above discovered handlers
+- lets common path-parameter usages jump back to candidate route declarations in the same file
 
 Current limitations:
 
-- endpoint discovery is currently source-based and focused on JAX-RS annotations
-- Helidon routing builder APIs, path-variable references, and endpoint inlay hints are not implemented yet
+- endpoint discovery is still source-based rather than semantic
+- service registration resolution is conservative and currently strongest when services are registered via `new ServiceType(...)`
+- endpoint inlay hints are represented as VS Code code lenses rather than IntelliJ-style inline hints
 
 ## Metadata source
 
@@ -114,6 +122,15 @@ Supported archetype choices right now:
 - `helidon-quickstart-mp`
 - `helidon-bare-se`
 
+The extension also includes **Helidon: Generate Run Files**.
+
+Current behavior:
+
+- detects Maven or Gradle projects in the selected workspace folder
+- creates or updates `.vscode/tasks.json` with `helidon: build` and `helidon: run`
+- creates or updates `.vscode/launch.json` with a Java launch configuration
+- reuses existing `.vscode` files instead of replacing unrelated entries
+
 ## Requirements
 
 - Visual Studio Code
@@ -126,14 +143,14 @@ No custom settings yet.
 
 ## Known Issues
 
-- Completion and hover support are currently scoped to Helidon-style `application.properties`, `microprofile-config.properties`, `application.yaml`, and `application.yml` files.
+- Completion and hover support are currently scoped to Helidon-style `application*.properties`, `microprofile-config.properties`, `application*.yaml`, and `application*.yml` files.
 - Completion, hover, and diagnostics depend on Java classpath metadata being available from `redhat.java`.
 - If the Java workspace is still loading, Helidon metadata may appear a moment later after classpath resolution finishes.
-- Diagnostics are intentionally conservative and do not yet include duplicate-key warnings for `.properties` files or value/reference validation.
+- Diagnostics are intentionally conservative and do not yet include duplicate-key warnings for `.properties` files.
 - Value validation is intentionally conservative and currently only covers scalar boolean, integer, and long-backed Helidon properties.
 - Quick fixes are currently limited to typo corrections, malformed indexed keys, and duplicate YAML key removal.
 - The new scalar/list path diagnostics do not yet have dedicated quick fixes.
-- Endpoint discovery is currently limited to JAX-RS-annotated Java resources and does not yet cover Helidon routing builder patterns.
+- Java `Config.get(...)` detection is source-pattern-based and intentionally conservative rather than full Java semantic analysis.
 
 ## Release Notes
 
