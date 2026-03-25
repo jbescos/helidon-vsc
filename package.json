@@ -19,6 +19,8 @@
     "onCommand:helidon-vsc.generateProject",
     "onCommand:helidon-vsc.generateProjectCliWizard",
     "onCommand:helidon-vsc.generateRunFiles",
+    "onCommand:helidon-vsc.runProject",
+    "onCommand:helidon-vsc.debugProject",
     "onCommand:helidon-vsc.refreshEndpoints",
     "onCommand:helidon-vsc.reloadExtension"
   ],
@@ -39,6 +41,14 @@
       {
         "command": "helidon-vsc.generateRunFiles",
         "title": "Helidon: Generate Run Files"
+      },
+      {
+        "command": "helidon-vsc.runProject",
+        "title": "Helidon: Run Project"
+      },
+      {
+        "command": "helidon-vsc.debugProject",
+        "title": "Helidon: Debug Project"
       },
       {
         "command": "helidon-vsc.refreshEndpoints",

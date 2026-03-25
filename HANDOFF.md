@@ -356,6 +356,29 @@ Important scope note:
 - `redhat.java` is still useful for project/classpath integration, but it does not currently provide a public endpoint/AST API that this feature can build on directly
 - the run/bootstrap helper is the VS Code analogue of the IntelliJ run configuration bootstrap, not a full project wizard replacement
 
+### 19. Run/debug workflow integration pass
+Implemented the first actual run/debug workflow on top of the earlier scaffold generation:
+- new commands:
+  - `Helidon: Run Project`
+  - `Helidon: Debug Project`
+- both commands:
+  - pick the target workspace folder when needed
+  - refresh `.vscode/tasks.json` and `.vscode/launch.json` before launching
+  - start the Java launcher using the generated Helidon launch configuration
+- launch configuration behavior:
+  - uses the integrated terminal
+  - uses `helidon: build` as the pre-launch task
+- main-class detection behavior:
+  - prefers a discovered Java `main` class in workspace sources
+  - falls back to `io.helidon.Main` for likely Helidon MicroProfile projects
+- generated Maven run task behavior improved:
+  - now uses `org.codehaus.mojo:exec-maven-plugin` with the resolved main class instead of a bare `exec:java` assumption
+
+Important scope note:
+- this is still built on standard VS Code Java launch/debug support, not a custom Helidon runtime panel or dashboard
+- Gradle run-task generation is still conservative and assumes a standard `run` task is available
+- main-class fallback is intentionally conservative; projects without a discoverable `main` class or recognizable MP markers still need manual adjustment
+
 ---
 
 ## Commits created so far
@@ -619,7 +642,7 @@ Status legend:
 | Framework config authoring in properties/YAML (completion, docs/hover) | Yes | Yes | Yes | Yes | Supported for Helidon properties/YAML files including environment-specific variants |
 | Framework config diagnostics, navigation, and quick fixes | Yes | Partial | Yes | Partial | Helidon has conservative diagnostics, placeholder navigation, and some quick fixes, but coverage is still limited |
 | Framework-aware Java assistance | Yes | Yes | Yes | Partial | Helidon currently supports `Config.get("...")` plus some endpoint/path-aware features, not broader Helidon Java APIs yet |
-| Run/debug workflow integration | Yes | Yes | Yes | Partial | Helidon can generate `.vscode/tasks.json` and `.vscode/launch.json`, but does not yet have richer framework-specific run/debug UX |
+| Run/debug workflow integration | Yes | Yes | Yes | Partial | Helidon now has run/debug commands plus generated VS Code launch/tasks scaffolding, but still lacks richer framework-specific dashboards or runtime controls |
 
 ### Future comparison axes
 When the Helidon extension is more complete, the later comparison should look at least at:
@@ -692,6 +715,8 @@ Also defer competitor benchmarking until the Helidon extension is in a more comp
 - [x] Helidon project generation command using expanded built-in Maven archetypes
 - [x] Helidon CLI project-generation wizard launcher for richer archetype/feature selection during setup
 - [x] optional `.vscode/launch.json` / `.vscode/tasks.json` helper generation
+- [x] `Helidon: Run Project` helper command
+- [x] `Helidon: Debug Project` helper command
 
 ### Not implemented yet
 - [ ] duplicate `.properties` key diagnostics, if product direction wants them
@@ -703,7 +728,7 @@ Also defer competitor benchmarking until the Helidon extension is in a more comp
 - [ ] richer endpoint inlay/code-lens UX if needed
 - [ ] richer project wizard parity
 - [ ] first-class “add Helidon feature/dependency to existing project” support
-- [ ] richer run/debug/bootstrap parity beyond generated VS Code helpers
+- [ ] richer run/debug/bootstrap parity beyond command-palette-driven launch helpers
 - [ ] deeper Java LS plugin integration (deferred)
 
 ---
@@ -779,6 +804,8 @@ If inspections are tackled, be conservative because missing classpath metadata c
    - command palette → `Helidon: Refresh Endpoints`
    - command palette → `Helidon: Generate Project`
    - command palette → `Helidon: Generate Run Files`
+   - command palette → `Helidon: Run Project`
+   - command palette → `Helidon: Debug Project`
    - command palette → `Helidon: Reload Extension` (debug only)
 
 ---

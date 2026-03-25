@@ -27,6 +27,7 @@ Current feature set:
 - Helidon project generation via the Helidon CLI wizard when `helidon` is installed
 - Built-in Helidon Maven archetype project generation fallback
 - `Helidon: Generate Run Files` to create `.vscode/launch.json` and `.vscode/tasks.json` entries for an opened Helidon project
+- `Helidon: Run Project` and `Helidon: Debug Project` to launch the selected Helidon workspace through the Java launcher with the generated run/debug scaffold
 
 When editing an `application.properties` or `microprofile-config.properties` file, typing prefixes like `server.` will offer Helidon configuration keys such as:
 
@@ -144,13 +145,16 @@ Supported built-in fallback archetype choices right now:
 - `helidon-database-se`
 - `helidon-database-mp`
 
-The extension also includes **Helidon: Generate Run Files**.
+The extension also includes **Helidon: Generate Run Files**, **Helidon: Run Project**, and **Helidon: Debug Project**.
 
 Current behavior:
 
 - detects Maven or Gradle projects in the selected workspace folder
+- resolves a Java main class for launch and falls back to `io.helidon.Main` for likely Helidon MicroProfile projects
 - creates or updates `.vscode/tasks.json` with `helidon: build` and `helidon: run`
-- creates or updates `.vscode/launch.json` with a Java launch configuration
+- creates or updates `.vscode/launch.json` with a Java launch configuration that uses the integrated terminal
+- `Helidon: Run Project` refreshes that scaffold and starts the Java launcher in no-debug mode
+- `Helidon: Debug Project` refreshes that scaffold and starts the Java debugger
 - reuses existing `.vscode` files instead of replacing unrelated entries
 
 ## Requirements
@@ -164,6 +168,7 @@ Runtime requirements:
 Notes:
 
 - Installing `Extension Pack for Java` is also fine; it includes `redhat.java`
+- Installing `Extension Pack for Java` is recommended for the run/debug commands because it also includes Java Debugger support
 - This extension declares `redhat.java` as an extension dependency because Helidon metadata loading relies on its Java project/classpath API
 - No separate `java-parser` installation is required by users; `java-parser` is bundled as an internal dependency used for endpoint and path-parameter parsing
 - The richer Helidon project-generation wizard requires the `helidon` CLI to be installed separately and available on `PATH`
@@ -181,6 +186,7 @@ No custom settings yet.
 - Value validation is intentionally conservative and currently only covers scalar boolean, integer, and long-backed Helidon properties.
 - The CLI-based project-generation wizard currently runs in an integrated terminal and does not yet auto-open the generated project folder after the wizard completes.
 - Post-generation “add Helidon feature/dependency to an existing project” support is not implemented yet.
+- Run/debug main-class resolution is intentionally conservative; if no Java main class is found and the project does not look like a Helidon MicroProfile project, the run/debug commands will not start.
 - Quick fixes are currently limited to typo corrections, malformed indexed keys, and duplicate YAML key removal.
 - The new scalar/list path diagnostics do not yet have dedicated quick fixes.
 - Java `Config.get(...)` detection is source-pattern-based and intentionally conservative rather than full Java semantic analysis.

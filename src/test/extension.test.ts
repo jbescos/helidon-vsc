@@ -18,7 +18,15 @@ import {
 	replaceHelidonConfigProperties,
 } from '../helidonConfig';
 import { parseJavaConfigReferences } from '../javaConfig';
-import { buildLegacyMavenGenerateArgs, buildProjectGenerationModePicks, LEGACY_ARCHETYPES } from '../generator';
+import {
+	buildHelidonLaunchConfiguration,
+	buildHelidonRunTask,
+	buildLegacyMavenGenerateArgs,
+	buildProjectGenerationModePicks,
+	isLikelyHelidonMicroProfileProject,
+	LEGACY_ARCHETYPES,
+	resolveHelidonLaunchMainClass,
+} from '../generator';
 import { parseHelidonConfigMetadata, type HelidonConfigProperty } from '../metadata';
 import { loadHelidonConfigMetadataFromJavaClasspaths, type JavaExtensionApi } from '../javaMetadata';
 
@@ -998,6 +1006,53 @@ suite('Extension Test Suite', () => {
 				'-DinteractiveMode=false',
 			]
 		);
+	});
+
+	test('MicroProfile projects fall back to io.helidon.Main when no Java main class is discovered', () => {
+		assert.strictEqual(resolveHelidonLaunchMainClass(undefined, true), 'io.helidon.Main');
+		assert.strictEqual(resolveHelidonLaunchMainClass('com.example.Main', true), 'com.example.Main');
+		assert.strictEqual(resolveHelidonLaunchMainClass(undefined, false), undefined);
+	});
+
+	test('launch configuration uses the Helidon build task and integrated terminal', () => {
+		assert.deepStrictEqual(buildHelidonLaunchConfiguration('com.example.Main'), {
+			type: 'java',
+			name: 'Launch Helidon Application',
+			request: 'launch',
+			mainClass: 'com.example.Main',
+			cwd: '${workspaceFolder}',
+			console: 'integratedTerminal',
+			preLaunchTask: 'helidon: build',
+		});
+	});
+
+	test('Maven run task executes the resolved main class through exec-maven-plugin', () => {
+		assert.deepStrictEqual(buildHelidonRunTask('maven', 'io.helidon.Main'), {
+			label: 'helidon: run',
+			type: 'shell',
+			command: 'mvn',
+			args: ['compile', 'org.codehaus.mojo:exec-maven-plugin:3.6.2:java', '-Dexec.mainClass=io.helidon.Main'],
+			problemMatcher: [],
+		});
+	});
+
+	test('MicroProfile project detection recognizes pom.xml markers and config layout', async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'helidon-vsc-mp-'));
+		try {
+			await fs.writeFile(
+				path.join(tempRoot, 'pom.xml'),
+				'<project><dependencies><dependency><artifactId>helidon-microprofile-core</artifactId></dependency></dependencies></project>',
+				'utf8'
+			);
+			assert.strictEqual(await isLikelyHelidonMicroProfileProject(tempRoot), true);
+
+			const configRoot = path.join(tempRoot, 'src', 'main', 'resources', 'META-INF');
+			await fs.mkdir(configRoot, { recursive: true });
+			await fs.writeFile(path.join(configRoot, 'microprofile-config.properties'), 'server.port=8080\n', 'utf8');
+			assert.strictEqual(await isLikelyHelidonMicroProfileProject(tempRoot), true);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
 	});
 
 	test('classpath metadata loader reads Helidon metadata from directories and jars', async () => {

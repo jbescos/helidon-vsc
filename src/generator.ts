@@ -8,10 +8,12 @@ const execFileAsync = promisify(execFile);
 const HELIDON_BUILD_TASK_LABEL = 'helidon: build';
 const HELIDON_RUN_TASK_LABEL = 'helidon: run';
 const HELIDON_LAUNCH_CONFIGURATION_NAME = 'Launch Helidon Application';
+const HELIDON_MICROPROFILE_MAIN_CLASS = 'io.helidon.Main';
 const HELIDON_CLI_COMMAND = 'helidon';
 const HELIDON_CLI_INIT_COMMAND = 'helidon init';
 const HELIDON_CLI_WIZARD_TERMINAL_NAME = 'Helidon CLI Wizard';
 const HELIDON_CLI_DOCS_URI = vscode.Uri.parse('https://helidon.io/docs/latest/about/cli');
+const JAVA_DEBUG_EXTENSION_ID = 'vscjava.vscode-java-debug';
 
 interface GenerateProjectOptions {
 	targetDirectory: string;
@@ -24,7 +26,7 @@ interface GenerateProjectOptions {
 
 interface LaunchJson {
 	version: string;
-	configurations: Array<Record<string, unknown>>;
+	configurations: vscode.DebugConfiguration[];
 }
 
 interface TasksJson {
@@ -32,8 +34,20 @@ interface TasksJson {
 	tasks: Array<Record<string, unknown>>;
 }
 
+type HelidonBuildTool = 'maven' | 'gradle';
+
 interface ProjectGenerationModePick extends vscode.QuickPickItem {
 	mode?: 'cli-wizard' | 'maven-archetype';
+}
+
+interface HelidonRunSupport {
+	workspaceFolder: vscode.WorkspaceFolder;
+	workspacePath: string;
+	buildTool: HelidonBuildTool;
+	mainClass: string;
+	buildTask: Record<string, unknown>;
+	runTask: Record<string, unknown>;
+	launchConfiguration: vscode.DebugConfiguration;
 }
 
 export const LEGACY_ARCHETYPES = [
@@ -274,10 +288,10 @@ export async function generateHelidonProjectWithCliWizard(): Promise<void> {
 	);
 }
 
-async function pickWorkspaceFolder(): Promise<vscode.WorkspaceFolder | undefined> {
+async function pickWorkspaceFolder(actionDescription: string): Promise<vscode.WorkspaceFolder | undefined> {
 	const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
 	if (workspaceFolders.length === 0) {
-		vscode.window.showWarningMessage('Open a Helidon workspace folder before generating VS Code run files.');
+		vscode.window.showWarningMessage(`Open a Helidon workspace folder before ${actionDescription}.`);
 		return undefined;
 	}
 
@@ -294,7 +308,7 @@ async function pickWorkspaceFolder(): Promise<vscode.WorkspaceFolder | undefined
 	}
 
 	const selected = await vscode.window.showWorkspaceFolderPick({
-		placeHolder: 'Select the Helidon workspace folder for VS Code run files',
+		placeHolder: `Select the Helidon workspace folder to ${actionDescription}`,
 	});
 	return selected ?? undefined;
 }
@@ -308,7 +322,7 @@ async function pathExists(targetPath: string): Promise<boolean> {
 	}
 }
 
-async function detectBuildTool(workspacePath: string): Promise<'maven' | 'gradle' | undefined> {
+async function detectBuildTool(workspacePath: string): Promise<HelidonBuildTool | undefined> {
 	if (await pathExists(path.join(workspacePath, 'pom.xml'))) {
 		return 'maven';
 	}
@@ -323,6 +337,14 @@ async function detectBuildTool(workspacePath: string): Promise<'maven' | 'gradle
 	return undefined;
 }
 
+async function readFileIfExists(filePath: string): Promise<string | undefined> {
+	try {
+		return await fs.readFile(filePath, 'utf8');
+	} catch {
+		return undefined;
+	}
+}
+
 async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {
 	try {
 		return JSON.parse(await fs.readFile(filePath, 'utf8')) as T;
@@ -331,11 +353,11 @@ async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {
 	}
 }
 
-function upsertNamedEntry(
-	entries: Array<Record<string, unknown>>,
+function upsertNamedEntry<T extends Record<string, unknown>>(
+	entries: T[],
 	entryKey: 'label' | 'name',
-	entry: Record<string, unknown>,
-): Array<Record<string, unknown>> {
+	entry: T,
+): T[] {
 	const existingIndex = entries.findIndex((candidate) => candidate[entryKey] === entry[entryKey]);
 	if (existingIndex === -1) {
 		return [...entries, entry];
@@ -378,6 +400,203 @@ async function findMainClass(workspacePath: string): Promise<string | undefined>
 	return undefined;
 }
 
+export async function isLikelyHelidonMicroProfileProject(workspacePath: string): Promise<boolean> {
+	if (await pathExists(path.join(workspacePath, 'src', 'main', 'resources', 'META-INF', 'microprofile-config.properties'))) {
+		return true;
+	}
+
+	const microProfilePattern =
+		/helidon-microprofile|<artifactId>\s*helidon-mp\s*<\/artifactId>|io\.helidon\.microprofile/u;
+	for (const buildFileName of ['pom.xml', 'build.gradle', 'build.gradle.kts']) {
+		const contents = await readFileIfExists(path.join(workspacePath, buildFileName));
+		if (contents && microProfilePattern.test(contents)) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+export function resolveHelidonLaunchMainClass(
+	discoveredMainClass: string | undefined,
+	isMicroProfileProject: boolean
+): string | undefined {
+	if (discoveredMainClass) {
+		return discoveredMainClass;
+	}
+
+	return isMicroProfileProject ? HELIDON_MICROPROFILE_MAIN_CLASS : undefined;
+}
+
+async function detectHelidonLaunchMainClass(workspacePath: string): Promise<string | undefined> {
+	const discoveredMainClass = await findMainClass(workspacePath);
+	const isMicroProfileProject = await isLikelyHelidonMicroProfileProject(workspacePath);
+	return resolveHelidonLaunchMainClass(discoveredMainClass, isMicroProfileProject);
+}
+
+export function buildHelidonBuildTask(buildTool: HelidonBuildTool): Record<string, unknown> {
+	return buildTool === 'maven'
+		? {
+				label: HELIDON_BUILD_TASK_LABEL,
+				type: 'shell',
+				command: 'mvn',
+				args: ['package'],
+				group: 'build',
+				problemMatcher: [],
+			}
+		: {
+				label: HELIDON_BUILD_TASK_LABEL,
+				type: 'shell',
+				command: './gradlew',
+				args: ['build'],
+				group: 'build',
+				problemMatcher: [],
+			};
+}
+
+export function buildHelidonRunTask(buildTool: HelidonBuildTool, mainClass: string): Record<string, unknown> {
+	return buildTool === 'maven'
+		? {
+				label: HELIDON_RUN_TASK_LABEL,
+				type: 'shell',
+				command: 'mvn',
+				args: ['compile', 'org.codehaus.mojo:exec-maven-plugin:3.6.2:java', `-Dexec.mainClass=${mainClass}`],
+				problemMatcher: [],
+			}
+		: {
+				label: HELIDON_RUN_TASK_LABEL,
+				type: 'shell',
+				command: './gradlew',
+				args: ['run'],
+				problemMatcher: [],
+			};
+}
+
+export function buildHelidonLaunchConfiguration(mainClass: string): vscode.DebugConfiguration {
+	return {
+		type: 'java',
+		name: HELIDON_LAUNCH_CONFIGURATION_NAME,
+		request: 'launch',
+		mainClass,
+		cwd: '${workspaceFolder}',
+		console: 'integratedTerminal',
+		preLaunchTask: HELIDON_BUILD_TASK_LABEL,
+	};
+}
+
+function hasJavaDebugExtensionInstalled(): boolean {
+	return vscode.extensions.getExtension(JAVA_DEBUG_EXTENSION_ID) !== undefined;
+}
+
+async function showMissingJavaDebugExtensionWarning(): Promise<void> {
+	const action = await vscode.window.showWarningMessage(
+		'Helidon run/debug commands require Java Debugger support from Extension Pack for Java.',
+		'Install Extension Pack for Java'
+	);
+	if (action === 'Install Extension Pack for Java') {
+		await vscode.commands.executeCommand('workbench.extensions.search', 'vscjava.vscode-java-pack');
+	}
+}
+
+async function prepareHelidonRunSupport(workspaceFolder: vscode.WorkspaceFolder): Promise<HelidonRunSupport | undefined> {
+	const workspacePath = workspaceFolder.uri.fsPath;
+	const buildTool = await detectBuildTool(workspacePath);
+	if (!buildTool) {
+		vscode.window.showWarningMessage(
+			'Could not detect Maven or Gradle build files in the selected workspace folder.'
+		);
+		return undefined;
+	}
+
+	const mainClass = await detectHelidonLaunchMainClass(workspacePath);
+	if (!mainClass) {
+		vscode.window.showWarningMessage(
+			'Could not resolve a Helidon launch main class in the selected workspace folder.'
+		);
+		return undefined;
+	}
+
+	return {
+		workspaceFolder,
+		workspacePath,
+		buildTool,
+		mainClass,
+		buildTask: buildHelidonBuildTask(buildTool),
+		runTask: buildHelidonRunTask(buildTool, mainClass),
+		launchConfiguration: buildHelidonLaunchConfiguration(mainClass),
+	};
+}
+
+async function writeHelidonRunFiles(runSupport: HelidonRunSupport): Promise<string> {
+	const vscodeDir = path.join(runSupport.workspacePath, '.vscode');
+	await fs.mkdir(vscodeDir, { recursive: true });
+
+	const launchJsonPath = path.join(vscodeDir, 'launch.json');
+	const tasksJsonPath = path.join(vscodeDir, 'tasks.json');
+
+	const launchJson = await readJsonFile<LaunchJson>(launchJsonPath, {
+		version: '0.2.0',
+		configurations: [],
+	});
+	launchJson.configurations = upsertNamedEntry(
+		launchJson.configurations,
+		'name',
+		runSupport.launchConfiguration
+	);
+	await fs.writeFile(launchJsonPath, `${JSON.stringify(launchJson, null, 2)}\n`, 'utf8');
+
+	const tasksJson = await readJsonFile<TasksJson>(tasksJsonPath, {
+		version: '2.0.0',
+		tasks: [],
+	});
+	tasksJson.tasks = upsertNamedEntry(tasksJson.tasks, 'label', runSupport.buildTask);
+	tasksJson.tasks = upsertNamedEntry(tasksJson.tasks, 'label', runSupport.runTask);
+	await fs.writeFile(tasksJsonPath, `${JSON.stringify(tasksJson, null, 2)}\n`, 'utf8');
+
+	return vscodeDir;
+}
+
+async function ensureHelidonRunFiles(
+	workspaceFolder: vscode.WorkspaceFolder
+): Promise<HelidonRunSupport | undefined> {
+	const runSupport = await prepareHelidonRunSupport(workspaceFolder);
+	if (!runSupport) {
+		return undefined;
+	}
+
+	await writeHelidonRunFiles(runSupport);
+	return runSupport;
+}
+
+async function startHelidonProjectDebugSession(noDebug: boolean): Promise<void> {
+	if (!hasJavaDebugExtensionInstalled()) {
+		await showMissingJavaDebugExtensionWarning();
+		return;
+	}
+
+	const workspaceFolder = await pickWorkspaceFolder(noDebug ? 'running the Helidon project' : 'debugging the Helidon project');
+	if (!workspaceFolder) {
+		return;
+	}
+
+	const runSupport = await ensureHelidonRunFiles(workspaceFolder);
+	if (!runSupport) {
+		return;
+	}
+
+	try {
+		const started = await vscode.debug.startDebugging(workspaceFolder, runSupport.launchConfiguration, {
+			noDebug,
+		});
+		if (!started) {
+			vscode.window.showErrorMessage(`Failed to ${noDebug ? 'run' : 'debug'} the Helidon project.`);
+		}
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		vscode.window.showErrorMessage(`Failed to ${noDebug ? 'run' : 'debug'} the Helidon project: ${message}`);
+	}
+}
+
 export async function generateHelidonProject(): Promise<void> {
 	const cliAvailable = await isHelidonCliAvailable();
 	const mode = await promptForProjectGenerationMode(cliAvailable);
@@ -394,86 +613,24 @@ export async function generateHelidonProject(): Promise<void> {
 }
 
 export async function generateHelidonRunFiles(): Promise<void> {
-	const workspaceFolder = await pickWorkspaceFolder();
+	const workspaceFolder = await pickWorkspaceFolder('generating VS Code run files');
 	if (!workspaceFolder) {
 		return;
 	}
 
-	const workspacePath = workspaceFolder.uri.fsPath;
-	const buildTool = await detectBuildTool(workspacePath);
-	if (!buildTool) {
-		vscode.window.showWarningMessage(
-			'Could not detect Maven or Gradle build files in the selected workspace folder.'
-		);
+	const runSupport = await prepareHelidonRunSupport(workspaceFolder);
+	if (!runSupport) {
 		return;
 	}
 
-	const vscodeDir = path.join(workspacePath, '.vscode');
-	await fs.mkdir(vscodeDir, { recursive: true });
+	const vscodeDir = await writeHelidonRunFiles(runSupport);
+	vscode.window.showInformationMessage(`Generated VS Code run files in ${vscodeDir}`);
+}
 
-	const launchJsonPath = path.join(vscodeDir, 'launch.json');
-	const tasksJsonPath = path.join(vscodeDir, 'tasks.json');
-	const mainClass = (await findMainClass(workspacePath)) ?? 'io.helidon.microprofile.cdi.Main';
+export async function runHelidonProject(): Promise<void> {
+	await startHelidonProjectDebugSession(true);
+}
 
-	const buildTask =
-		buildTool === 'maven'
-			? {
-					label: HELIDON_BUILD_TASK_LABEL,
-					type: 'shell',
-					command: 'mvn',
-					args: ['package'],
-					group: 'build',
-					problemMatcher: [],
-				}
-			: {
-					label: HELIDON_BUILD_TASK_LABEL,
-					type: 'shell',
-					command: './gradlew',
-					args: ['build'],
-					group: 'build',
-					problemMatcher: [],
-				};
-
-	const runTask =
-		buildTool === 'maven'
-			? {
-					label: HELIDON_RUN_TASK_LABEL,
-					type: 'shell',
-					command: 'mvn',
-					args: ['compile', 'exec:java'],
-					problemMatcher: [],
-				}
-			: {
-					label: HELIDON_RUN_TASK_LABEL,
-					type: 'shell',
-					command: './gradlew',
-					args: ['run'],
-					problemMatcher: [],
-				};
-
-	const launchConfiguration: Record<string, unknown> = {
-		type: 'java',
-		name: HELIDON_LAUNCH_CONFIGURATION_NAME,
-		request: 'launch',
-		mainClass,
-		cwd: '${workspaceFolder}',
-		preLaunchTask: HELIDON_BUILD_TASK_LABEL,
-	};
-
-	const launchJson = await readJsonFile<LaunchJson>(launchJsonPath, {
-		version: '0.2.0',
-		configurations: [],
-	});
-	launchJson.configurations = upsertNamedEntry(launchJson.configurations, 'name', launchConfiguration);
-	await fs.writeFile(launchJsonPath, `${JSON.stringify(launchJson, null, 2)}\n`, 'utf8');
-
-	const tasksJson = await readJsonFile<TasksJson>(tasksJsonPath, {
-		version: '2.0.0',
-		tasks: [],
-	});
-	tasksJson.tasks = upsertNamedEntry(tasksJson.tasks, 'label', buildTask);
-	tasksJson.tasks = upsertNamedEntry(tasksJson.tasks, 'label', runTask);
-	await fs.writeFile(tasksJsonPath, `${JSON.stringify(tasksJson, null, 2)}\n`, 'utf8');
-
-	vscode.window.showInformationMessage(`Generated VS Code run files in ${path.join(workspacePath, '.vscode')}`);
+export async function debugHelidonProject(): Promise<void> {
+	await startHelidonProjectDebugSession(false);
 }

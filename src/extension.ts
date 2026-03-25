@@ -12,7 +12,13 @@ import {
 	HelidonYamlCompletionProvider,
 	replaceHelidonConfigProperties,
 } from './helidonConfig';
-import { generateHelidonProject, generateHelidonProjectWithCliWizard, generateHelidonRunFiles } from './generator';
+import {
+	debugHelidonProject,
+	generateHelidonProject,
+	generateHelidonProjectWithCliWizard,
+	generateHelidonRunFiles,
+	runHelidonProject,
+} from './generator';
 import {
 	collectHelidonJavaDiagnostics,
 	HelidonConfigPlaceholderDefinitionProvider,
@@ -141,6 +147,14 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const generateRunFilesCommand = vscode.commands.registerCommand('helidon-vsc.generateRunFiles', async () => {
 		await generateHelidonRunFiles();
+	});
+
+	const runProjectCommand = vscode.commands.registerCommand('helidon-vsc.runProject', async () => {
+		await runHelidonProject();
+	});
+
+	const debugProjectCommand = vscode.commands.registerCommand('helidon-vsc.debugProject', async () => {
+		await debugHelidonProject();
 	});
 
 	const reloadExtensionCommand = vscode.commands.registerCommand('helidon-vsc.reloadExtension', async () => {
@@ -353,6 +367,8 @@ export function activate(context: vscode.ExtensionContext) {
 		generateProjectCommand,
 		generateProjectCliWizardCommand,
 		generateRunFilesCommand,
+		runProjectCommand,
+		debugProjectCommand,
 		reloadExtensionCommand,
 		openEndpointCommand,
 		refreshEndpointsCommand,
