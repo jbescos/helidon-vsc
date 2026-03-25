@@ -13,17 +13,17 @@ interface HelidonMetadataModule {
 
 interface HelidonMetadataType {
 	type: string;
-	standalone: boolean;
-	prefix: string;
-	inherits: string[];
-	options: HelidonMetadataOption[];
+	standalone?: boolean;
+	prefix?: string;
+	inherits?: string[];
+	options?: HelidonMetadataOption[];
 }
 
 interface HelidonMetadataOption {
 	key: string;
-	type: string;
-	description: string;
-	kind: 'VALUE' | 'LIST' | 'MAP';
+	type?: string;
+	description?: string;
+	kind?: 'VALUE' | 'LIST' | 'MAP';
 	method?: string;
 	deprecated?: boolean;
 	defaultValue?: string;
@@ -42,17 +42,33 @@ function flattenType(
 	visited.add(metadataType.type);
 	const properties: HelidonConfigProperty[] = [];
 
-	for (const option of metadataType.options) {
+	for (const inheritedTypeName of metadataType.inherits ?? []) {
+		const inheritedType = metadataTypes.get(inheritedTypeName);
+		if (!inheritedType) {
+			continue;
+		}
+
+		properties.push(...flattenType(inheritedType, metadataTypes, prefix, new Set(visited)));
+	}
+
+	for (const option of metadataType.options ?? []) {
+		if (!option.key) {
+			continue;
+		}
+
 		const key = prefix ? `${prefix}.${option.key}` : option.key;
-		const nestedType = metadataTypes.get(option.type);
-		const isLeaf = !nestedType || option.kind === 'LIST' || option.kind === 'MAP' || option.type.startsWith('java.');
+		const optionType = option.type ?? 'unknown';
+		const optionKind = option.kind ?? 'VALUE';
+		const nestedType = option.type ? metadataTypes.get(option.type) : undefined;
+		const isLeaf =
+			!nestedType || optionKind === 'LIST' || optionKind === 'MAP' || optionType.startsWith('java.');
 
 		if (isLeaf) {
 			properties.push({
 				key,
-				type: option.kind === 'LIST' ? `list<${option.type}>` : option.type,
+				type: optionKind === 'LIST' ? `list<${optionType}>` : optionType,
 				defaultValue: option.defaultValue,
-				description: option.description,
+				description: option.description ?? '',
 				example: option.defaultValue,
 			});
 			continue;
@@ -68,8 +84,8 @@ function flattenMetadataModules(modules: readonly HelidonMetadataModule[]): Heli
 	const metadataTypes = new Map(modules.flatMap((module) => module.types.map((type) => [type.type, type] as const)));
 	return modules
 		.flatMap((module) => module.types)
-		.filter((type) => type.standalone && type.prefix.length > 0)
-		.flatMap((type) => flattenType(type, metadataTypes, type.prefix, new Set<string>()));
+		.filter((type) => type.standalone === true && (type.prefix ?? '').length > 0)
+		.flatMap((type) => flattenType(type, metadataTypes, type.prefix ?? '', new Set<string>()));
 }
 
 export function parseHelidonConfigMetadata(jsonText: string): HelidonConfigProperty[] {

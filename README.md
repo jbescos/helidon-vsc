@@ -56,8 +56,6 @@ It resolves the runtime classpath for the current workspace and reads `META-INF/
 
 There is no bundled fallback metadata catalog anymore. If the Java extension is missing, or the Java workspace has not finished loading, Helidon completion and hover will stay unavailable and the extension will show a warning.
 
-Use the command palette command **Helidon: Trigger Config Completion** to manually open suggestions while testing.
-
 ## Project generation
 
 The extension now includes **Helidon: Generate Project**.

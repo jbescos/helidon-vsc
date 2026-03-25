@@ -12,20 +12,24 @@
   ],
   "activationEvents": [
     "onLanguage:properties",
+    "onLanguage:java-properties",
     "onLanguage:yaml",
-    "onCommand:helidon-vsc.helloWorld",
-    "onCommand:helidon-vsc.generateProject"
+    "onCommand:helidon-vsc.generateProject",
+    "onCommand:helidon-vsc.reloadExtension"
   ],
   "main": "./dist/extension.js",
+  "extensionDependencies": [
+    "redhat.java"
+  ],
   "contributes": {
     "commands": [
       {
-        "command": "helidon-vsc.helloWorld",
-        "title": "Helidon: Trigger Config Completion"
-      },
-      {
         "command": "helidon-vsc.generateProject",
         "title": "Helidon: Generate Project"
+      },
+      {
+        "command": "helidon-vsc.reloadExtension",
+        "title": "Helidon: Reload Extension"
       }
     ]
   },

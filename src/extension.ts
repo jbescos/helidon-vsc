@@ -4,8 +4,6 @@ import {
 	HelidonPropertiesCompletionProvider,
 	HelidonPropertiesHoverProvider,
 	HelidonYamlCompletionProvider,
-	isHelidonPropertiesDocument,
-	isHelidonYamlDocument,
 	replaceHelidonConfigProperties,
 } from './helidonConfig';
 import { generateHelidonProject } from './generator';
@@ -15,11 +13,18 @@ import {
 	loadHelidonConfigMetadataFromJavaClasspaths,
 } from './javaMetadata';
 
+const INITIAL_METADATA_RETRY_DELAY_MS = 2000;
+const INITIAL_METADATA_MAX_ATTEMPTS = 15;
+
 export function activate(context: vscode.ExtensionContext) {
-	console.log('Helidon VS Code extension is active.');
+	const output = vscode.window.createOutputChannel('Helidon');
+	output.appendLine('Helidon VS Code extension is active.');
 	const diagnostics = vscode.languages.createDiagnosticCollection('helidon-vsc');
 	let missingJavaExtensionWarningShown = false;
 	let metadataUnavailableWarningShown = false;
+	let metadataBootstrapComplete = false;
+	let metadataRetryAttempts = 0;
+	let metadataRetryTimer: ReturnType<typeof setTimeout> | undefined;
 
 	const completionProvider = vscode.languages.registerCompletionItemProvider(
 		[
@@ -50,20 +55,12 @@ export function activate(context: vscode.ExtensionContext) {
 		new HelidonPropertiesHoverProvider()
 	);
 
-	const helloWorldCommand = vscode.commands.registerCommand('helidon-vsc.helloWorld', async () => {
-		const editor = vscode.window.activeTextEditor;
-		if (editor && (isHelidonPropertiesDocument(editor.document) || isHelidonYamlDocument(editor.document))) {
-			await vscode.commands.executeCommand('editor.action.triggerSuggest');
-			return;
-		}
-
-		vscode.window.showInformationMessage(
-			'Open an application.properties, microprofile-config.properties, or application.yaml file to try Helidon configuration completion.'
-		);
-	});
-
 	const generateProjectCommand = vscode.commands.registerCommand('helidon-vsc.generateProject', async () => {
 		await generateHelidonProject();
+	});
+
+	const reloadExtensionCommand = vscode.commands.registerCommand('helidon-vsc.reloadExtension', async () => {
+		await vscode.commands.executeCommand('workbench.action.reloadWindow');
 	});
 
 	const refreshDiagnostics = (document: vscode.TextDocument) => {
@@ -106,33 +103,74 @@ export function activate(context: vscode.ExtensionContext) {
 		await vscode.window.showWarningMessage(message);
 	};
 
+	const clearMetadataRetry = () => {
+		if (!metadataRetryTimer) {
+			return;
+		}
+
+		clearTimeout(metadataRetryTimer);
+		metadataRetryTimer = undefined;
+	};
+
+	const scheduleMetadataRetry = (reason: string) => {
+		if (metadataBootstrapComplete || metadataRetryTimer || metadataRetryAttempts >= INITIAL_METADATA_MAX_ATTEMPTS) {
+			return;
+		}
+
+		metadataRetryAttempts += 1;
+		output.appendLine(
+			`Scheduling Helidon metadata retry ${metadataRetryAttempts}/${INITIAL_METADATA_MAX_ATTEMPTS}: ${reason}`
+		);
+		metadataRetryTimer = setTimeout(() => {
+			metadataRetryTimer = undefined;
+			void refreshMetadataFromJavaClasspaths();
+		}, INITIAL_METADATA_RETRY_DELAY_MS);
+	};
+
 	let javaClasspathWatcherRegistered = false;
 	const refreshMetadataFromJavaClasspaths = async () => {
 		const workspaceFolders = vscode.workspace.workspaceFolders ?? [];
+		output.appendLine(`Refreshing Helidon metadata for ${workspaceFolders.length} workspace folder(s).`);
 		replaceHelidonConfigProperties([]);
 		if (workspaceFolders.length === 0) {
+			output.appendLine('No workspace folders are open.');
 			refreshAllDiagnostics();
 			return;
 		}
 
 		const javaApi = await getJavaExtensionApi();
 		if (!javaApi) {
+			output.appendLine('Java extension API is unavailable.');
 			refreshAllDiagnostics();
 			if (!hasJavaExtensionInstalled()) {
 				await showMissingJavaExtensionWarning();
 			} else {
-				await showMetadataUnavailableWarning(
-					'Language Support for Java by Red Hat is installed, but its project API is not available yet. Open a Java workspace and wait for initialization to finish.'
-				);
+				if (!metadataBootstrapComplete) {
+					scheduleMetadataRetry('Java extension API is not ready yet.');
+				}
+				if (metadataRetryAttempts >= INITIAL_METADATA_MAX_ATTEMPTS) {
+					await showMetadataUnavailableWarning(
+						'Language Support for Java by Red Hat is installed, but its project API is not available yet. Open a Java workspace and wait for initialization to finish.'
+					);
+				}
 			}
 			return;
 		}
 
 		const classpathMetadata = await loadHelidonConfigMetadataFromJavaClasspaths(javaApi, workspaceFolders);
+		output.appendLine(`Loaded ${classpathMetadata.length} Helidon metadata entries from Java classpaths.`);
 		replaceHelidonConfigProperties(classpathMetadata);
 		refreshAllDiagnostics();
 
-		if (classpathMetadata.length === 0) {
+		if (classpathMetadata.length > 0) {
+			metadataBootstrapComplete = true;
+			clearMetadataRetry();
+		} else if (!metadataBootstrapComplete) {
+			scheduleMetadataRetry('No Helidon metadata found yet; waiting for Java classpath import to settle.');
+		}
+
+		if (classpathMetadata.length === 0 && metadataRetryAttempts >= INITIAL_METADATA_MAX_ATTEMPTS) {
+			output.appendLine('No Helidon metadata was found on the current Java classpath.');
 			await showMetadataUnavailableWarning(
 				'Helidon configuration metadata is unavailable on the current Java classpath. Make sure the Helidon project has finished loading and that Helidon dependencies are present.'
 			);
@@ -163,11 +201,13 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(
 		diagnostics,
+		output,
+		new vscode.Disposable(clearMetadataRetry),
 		completionProvider,
 		yamlCompletionProvider,
 		hoverProvider,
-		helloWorldCommand,
 		generateProjectCommand,
+		reloadExtensionCommand,
 		openDocumentDiagnostics,
 		changeDocumentDiagnostics,
 		closeDocumentDiagnostics,

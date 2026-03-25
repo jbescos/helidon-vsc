@@ -10,6 +10,8 @@ import {
 } from './metadata';
 
 const HELIDON_METADATA_ENTRY_PATH = 'META-INF/helidon/config-metadata.json';
+const JAVA_EXECUTE_WORKSPACE_COMMAND = 'java.execute.workspaceCommand';
+const JAVA_GET_CLASSPATHS_COMMAND = 'java.project.getClasspaths';
 
 interface JavaClasspaths {
 	classpaths: string[];
@@ -22,6 +24,13 @@ export interface JavaExtensionApi {
 	onDidClasspathUpdate?(listener: (uri: vscode.Uri) => void): vscode.Disposable;
 }
 
+interface JavaExtensionApiContainer {
+	getApiInstance?(): unknown;
+	apiManager?: {
+		getApiInstance?(): unknown;
+	};
+}
+
 function isJavaExtensionApi(value: unknown): value is JavaExtensionApi {
 	if (!value || typeof value !== 'object') {
 		return false;
@@ -29,6 +38,43 @@ function isJavaExtensionApi(value: unknown): value is JavaExtensionApi {
 
 	const candidate = value as Partial<JavaExtensionApi>;
 	return typeof candidate.serverReady === 'function' && typeof candidate.getClasspaths === 'function';
+}
+
+function getJavaExtensionApiFromContainer(value: unknown): JavaExtensionApi | undefined {
+	if (!value || typeof value !== 'object') {
+		return undefined;
+	}
+
+	const candidate = value as JavaExtensionApiContainer;
+	const directApi = candidate.getApiInstance?.();
+	if (isJavaExtensionApi(directApi)) {
+		return directApi;
+	}
+
+	const apiManagerApi = candidate.apiManager?.getApiInstance?.();
+	if (isJavaExtensionApi(apiManagerApi)) {
+		return apiManagerApi;
+	}
+
+	return undefined;
+}
+
+function createCommandBackedJavaApi(): JavaExtensionApi {
+	return {
+		async serverReady() {
+			return;
+		},
+		async getClasspaths(uri: string, options: { scope: 'runtime' | 'test' }) {
+			const result = await vscode.commands.executeCommand<JavaClasspaths | undefined>(
+				JAVA_EXECUTE_WORKSPACE_COMMAND,
+				JAVA_GET_CLASSPATHS_COMMAND,
+				uri,
+				JSON.stringify(options)
+			);
+
+			return result ?? { classpaths: [], modulepaths: [] };
+		},
+	};
 }
 
 function normalizeClasspathEntry(entry: string): string {
@@ -87,12 +133,17 @@ export async function getJavaExtensionApi(): Promise<JavaExtensionApi | undefine
 		return undefined;
 	}
 
-	const api = await extension.activate();
-	if (!isJavaExtensionApi(api)) {
-		return undefined;
+	const activated = await extension.activate();
+	if (isJavaExtensionApi(activated)) {
+		return activated;
 	}
 
-	return api;
+	const containerApi = getJavaExtensionApiFromContainer(activated);
+	if (containerApi) {
+		return containerApi;
+	}
+
+	return createCommandBackedJavaApi();
 }
 
 export function hasJavaExtensionInstalled(): boolean {
