@@ -1,3 +1,4 @@
+import { HelidonEndpointsTreeDataProvider } from './endpoints';
 import * as vscode from 'vscode';
 import {
 	collectHelidonDiagnostics,
@@ -21,6 +22,11 @@ export function activate(context: vscode.ExtensionContext) {
 	const output = vscode.window.createOutputChannel('Helidon');
 	output.appendLine('Helidon VS Code extension is active.');
 	const diagnostics = vscode.languages.createDiagnosticCollection('helidon-vsc');
+	const endpointsProvider = new HelidonEndpointsTreeDataProvider();
+	const endpointsView = vscode.window.createTreeView('helidonEndpoints', {
+		treeDataProvider: endpointsProvider,
+		showCollapseAll: true,
+	});
 	let missingJavaExtensionWarningShown = false;
 	let metadataUnavailableWarningShown = false;
 	let metadataBootstrapComplete = false;
@@ -77,6 +83,34 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const reloadExtensionCommand = vscode.commands.registerCommand('helidon-vsc.reloadExtension', async () => {
 		await vscode.commands.executeCommand('workbench.action.reloadWindow');
+	});
+
+	const openEndpointCommand = vscode.commands.registerCommand(
+		'helidon-vsc.openEndpoint',
+		async (uri: vscode.Uri, range?: vscode.Range) => {
+			const document = await vscode.workspace.openTextDocument(uri);
+			const editor = await vscode.window.showTextDocument(document, { preview: false });
+			if (range) {
+				editor.selection = new vscode.Selection(range.start, range.end);
+				editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+			}
+		}
+	);
+
+	const refreshEndpointsView = async () => {
+		endpointsProvider.refresh();
+		if ((vscode.workspace.workspaceFolders ?? []).length === 0) {
+			endpointsView.message = 'Open a Helidon workspace to discover endpoints.';
+			return;
+		}
+
+		const endpointCount = await endpointsProvider.endpointCount();
+		endpointsView.message =
+			endpointCount === 0 ? 'No Helidon endpoints found in workspace Java sources.' : undefined;
+	};
+
+	const refreshEndpointsCommand = vscode.commands.registerCommand('helidon-vsc.refreshEndpoints', async () => {
+		await refreshEndpointsView();
 	});
 
 	const refreshDiagnostics = (document: vscode.TextDocument) => {
@@ -203,21 +237,46 @@ export function activate(context: vscode.ExtensionContext) {
 	};
 
 	refreshAllDiagnostics();
+	void refreshEndpointsView();
 
 	const openDocumentDiagnostics = vscode.workspace.onDidOpenTextDocument(refreshDiagnostics);
 	const changeDocumentDiagnostics = vscode.workspace.onDidChangeTextDocument((event) => {
 		refreshDiagnostics(event.document);
+		if (event.document.languageId === 'java') {
+			void refreshEndpointsView();
+		}
 	});
 	const closeDocumentDiagnostics = vscode.workspace.onDidCloseTextDocument((document) => {
 		diagnostics.delete(document.uri);
 	});
 	const workspaceFoldersChanged = vscode.workspace.onDidChangeWorkspaceFolders(() => {
 		void refreshMetadataFromJavaClasspaths();
+		void refreshEndpointsView();
+	});
+	const javaFileCreated = vscode.workspace.onDidCreateFiles((event) => {
+		if (event.files.some((file) => file.path.endsWith('.java'))) {
+			void refreshEndpointsView();
+		}
+	});
+	const javaFileDeleted = vscode.workspace.onDidDeleteFiles((event) => {
+		if (event.files.some((file) => file.path.endsWith('.java'))) {
+			void refreshEndpointsView();
+		}
+	});
+	const javaFileRenamed = vscode.workspace.onDidRenameFiles((event) => {
+		if (
+			event.files.some(
+				(file) => file.oldUri.path.endsWith('.java') || file.newUri.path.endsWith('.java')
+			)
+		) {
+			void refreshEndpointsView();
+		}
 	});
 
 	context.subscriptions.push(
 		diagnostics,
 		output,
+		endpointsView,
 		new vscode.Disposable(clearMetadataRetry),
 		completionProvider,
 		yamlCompletionProvider,
@@ -225,10 +284,15 @@ export function activate(context: vscode.ExtensionContext) {
 		codeActionProvider,
 		generateProjectCommand,
 		reloadExtensionCommand,
+		openEndpointCommand,
+		refreshEndpointsCommand,
 		openDocumentDiagnostics,
 		changeDocumentDiagnostics,
 		closeDocumentDiagnostics,
 		workspaceFoldersChanged,
+		javaFileCreated,
+		javaFileDeleted,
+		javaFileRenamed,
 	);
 
 	void refreshMetadataFromJavaClasspaths();

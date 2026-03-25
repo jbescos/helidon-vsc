@@ -65,6 +65,9 @@ Original statement also said:
 **Important note for the next conversation:**
 Per latest user instruction, **ignore the Java-language-server integration for now** and treat it as a **last refactoring step**, not the current focus.
 
+**Workflow note:**
+When creating git commits for this repo, use a signed-off commit via `git commit -s`.
+
 ---
 
 ## Current repository
@@ -245,6 +248,21 @@ Important scope note:
 - more complex types such as duration, size, enums, placeholders, or references are still not validated
 - there are no quick fixes yet for invalid scalar values
 
+### 14. First endpoint discovery/display/navigation pass
+Implemented an initial endpoint feature set in the VS Code extension:
+- Explorer view: `Helidon Endpoints`
+- source-based discovery of JAX-RS resources in workspace Java files
+- class-level and method-level `@Path` path composition
+- HTTP method detection for `@GET`, `@POST`, `@PUT`, `@DELETE`, `@PATCH`, `@HEAD`, and `@OPTIONS`
+- endpoint grouping by resource class
+- click-through navigation from endpoint tree items back to the Java method source
+- manual refresh command: `Helidon: Refresh Endpoints`
+
+Important scope note:
+- this is currently a conservative source scan, not a Java semantic model
+- current coverage is JAX-RS-style resources, which works well for the demo project
+- Helidon routing builder APIs, path-variable reference handling, and endpoint inlay hints are still not implemented
+
 ---
 
 ## Commits created so far
@@ -252,6 +270,12 @@ Important scope note:
 - `d5f3b80` — Add Helidon YAML config completion and hover
 - `2c1127a` — Align metadata format with Helidon IntelliJ model
 - `7dbf5ae` — Add Helidon project generation command
+- `73f9180` — Load Helidon metadata from Java classpaths
+- `11ae94e` — Fix Helidon extension startup and metadata loading
+- `d245d14` — Add Helidon config inspections
+- `a7566fa` — Add Helidon config quick fixes
+- `661a9ee` — Add Helidon path diagnostics
+- `ae7f88e` — Add Helidon value validation
 
 ---
 
@@ -376,6 +400,7 @@ Current VS Code parity status against the JetBrains plugin:
   - basic value-level validation for boolean and integer-like scalar properties
   - duplicate YAML key diagnostics
   - basic quick fixes/code actions for typo corrections, indexed-key fixes, and duplicate YAML key removal
+  - endpoint discovery/display/navigation for JAX-RS resources
   - project generation command
   - metadata loading from `META-INF/helidon/config-metadata.json`
 
@@ -385,8 +410,8 @@ Current VS Code parity status against the JetBrains plugin:
   - duplicate `.properties` key handling (if desired)
   - richer code actions for the remaining inspections
   - Java-side config key references/navigation
-  - endpoint discovery/display/navigation
   - endpoint inlay/code-lens-style affordances
+  - broader endpoint discovery beyond JAX-RS (e.g. routing builder patterns)
   - richer project wizard parity
   - run/debug bootstrap parity
 
@@ -423,6 +448,9 @@ So for the next conversation, do **not** center the work around a deeper JDT LS 
 - [x] typo-correction quick fixes for strong unknown-key matches
 - [x] malformed indexed-key quick fixes
 - [x] duplicate YAML key removal quick fixes
+- [x] endpoint discovery/display/navigation for JAX-RS Java resources
+- [x] Explorer tree view for Helidon endpoints
+- [x] navigation from endpoint entries to Java source
 - [x] structured metadata parser inspired by IntelliJ plugin
 - [x] Java classpath metadata loading via `redhat.java`
 - [x] parser compatibility with real Helidon 4 metadata
@@ -436,9 +464,11 @@ So for the next conversation, do **not** center the work around a deeper JDT LS 
 ### Not implemented yet
 - [ ] duplicate `.properties` key diagnostics, if product direction wants them
 - [ ] richer code actions for path-shape and value-level diagnostics
-- [ ] endpoint discovery / display
 - [ ] Java-side Helidon references / navigation
 - [ ] value/reference intelligence for config values and placeholders
+- [ ] broader endpoint discovery for non-JAX-RS Helidon patterns
+- [ ] endpoint path-variable references / navigation
+- [ ] endpoint inlay/code-lens-style affordances
 - [ ] richer project wizard parity
 - [ ] run/debug bootstrap helpers
 - [ ] optional `.vscode/` helper generation command
@@ -455,10 +485,10 @@ Suggested next priorities for the new conversation:
 2. **Richer code actions** for new inspections where safe:
    - follow-on fixes for scalar/list path-shape issues
    - any safe value-level correction or normalization helpers
-3. **Endpoint discovery / display**:
-   - discover Helidon routes/endpoints from Java
-   - expose them in a VS Code tree view, panel, or code lens form
-   - support navigation from endpoint entries to source
+3. **Endpoint support expansion**:
+   - discover non-JAX-RS Helidon routes/endpoints from Java
+   - add path-variable awareness and richer endpoint metadata
+   - consider code-lens/inlay affordances if they add real value
 4. **Java-side Helidon features**:
    - detect Helidon config key literals in Java
    - navigate between Java usage and config definitions where feasible
@@ -499,7 +529,10 @@ If inspections are tackled, be conservative because missing classpath metadata c
    - list-backed YAML mappings without a list item under `logging.loggers`
    - invalid YAML scalar values such as `metrics.enabled: maybe`
    - duplicate YAML key quick fix
+   - Explorer view → `Helidon Endpoints`
+   - click an endpoint entry and confirm it opens the Java method
    - output panel → `Helidon`
+   - command palette → `Helidon: Refresh Endpoints`
    - command palette → `Helidon: Generate Project`
    - command palette → `Helidon: Reload Extension` (debug only)
 
@@ -519,4 +552,4 @@ If inspections are tackled, be conservative because missing classpath metadata c
 ---
 
 ## Suggested first action in the next conversation
-Read this file first, then continue with one concrete next milestone (probably remaining inspections or endpoint support), while keeping Java-language-server integration deferred until later.
+Read this file first, then continue with one concrete next milestone (probably endpoint expansion, Java-side references, or richer config validation), while keeping Java-language-server integration deferred until later.

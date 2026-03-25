@@ -14,7 +14,9 @@
     "onLanguage:properties",
     "onLanguage:java-properties",
     "onLanguage:yaml",
+    "onView:helidonEndpoints",
     "onCommand:helidon-vsc.generateProject",
+    "onCommand:helidon-vsc.refreshEndpoints",
     "onCommand:helidon-vsc.reloadExtension"
   ],
   "main": "./dist/extension.js",
@@ -28,10 +30,32 @@
         "title": "Helidon: Generate Project"
       },
       {
+        "command": "helidon-vsc.refreshEndpoints",
+        "title": "Helidon: Refresh Endpoints",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "helidon-vsc.reloadExtension",
         "title": "Helidon: Reload Extension"
       }
-    ]
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "helidonEndpoints",
+          "name": "Helidon Endpoints"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "helidon-vsc.refreshEndpoints",
+          "when": "view == helidonEndpoints",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",

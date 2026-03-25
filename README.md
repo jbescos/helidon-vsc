@@ -20,6 +20,8 @@ Current MVP feature:
 - Quick fixes for unknown-key typos when a strong Helidon metadata match exists
 - Quick fixes for malformed indexed properties keys
 - Quick fixes to remove duplicate YAML keys
+- Explorer view for Helidon endpoints discovered from JAX-RS Java resources
+- Click-through navigation from endpoint entries back to Java source methods
 - Helidon project generation command using Helidon Maven archetypes
 
 When editing an `application.properties` or `microprofile-config.properties` file, typing prefixes like `server.` will offer Helidon configuration keys such as:
@@ -72,6 +74,22 @@ Quick fixes currently cover:
 
 Diagnostics currently do not warn for duplicate keys in Java `.properties` files. Those files commonly use last-one-wins semantics, so duplicate-key inspection there is still undecided.
 
+## Endpoint discovery
+
+The extension now contributes a **Helidon Endpoints** view in the Explorer.
+
+Current endpoint support:
+
+- scans workspace Java files for JAX-RS resources using class-level and method-level `@Path`
+- detects HTTP methods from `@GET`, `@POST`, `@PUT`, `@DELETE`, `@PATCH`, `@HEAD`, and `@OPTIONS`
+- groups endpoints by resource class
+- opens the corresponding Java method when you click an endpoint entry
+
+Current limitations:
+
+- endpoint discovery is currently source-based and focused on JAX-RS annotations
+- Helidon routing builder APIs, path-variable references, and endpoint inlay hints are not implemented yet
+
 ## Metadata source
 
 The extension reads Helidon metadata from the Java classpath using the `Language Support for Java(TM) by Red Hat` extension API.
@@ -115,6 +133,7 @@ No custom settings yet.
 - Value validation is intentionally conservative and currently only covers scalar boolean, integer, and long-backed Helidon properties.
 - Quick fixes are currently limited to typo corrections, malformed indexed keys, and duplicate YAML key removal.
 - The new scalar/list path diagnostics do not yet have dedicated quick fixes.
+- Endpoint discovery is currently limited to JAX-RS-annotated Java resources and does not yet cover Helidon routing builder patterns.
 
 ## Release Notes
 

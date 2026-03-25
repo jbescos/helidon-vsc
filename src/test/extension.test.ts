@@ -7,6 +7,7 @@ import JSZip = require('jszip');
 // You can import and use all API from the 'vscode' module
 // as well as import your extension to test it
 import * as vscode from 'vscode';
+import { parseJavaJaxRsEndpoints } from '../endpoints';
 import {
 	collectHelidonPropertiesDiagnostics,
 	collectHelidonYamlDiagnostics,
@@ -225,6 +226,60 @@ suite('Extension Test Suite', () => {
 
 	test('metadata parser returns an empty result for invalid JSON', () => {
 		assert.deepStrictEqual(parseHelidonConfigMetadata('{'), []);
+	});
+
+	test('JAX-RS endpoint parser discovers class and method paths', () => {
+		const endpoints = parseJavaJaxRsEndpoints(`
+			import jakarta.ws.rs.GET;
+			import jakarta.ws.rs.PUT;
+			import jakarta.ws.rs.Path;
+
+			@Path("/greet")
+			public class GreetResource {
+			    @GET
+			    public Message getDefaultMessage() {
+			        return null;
+			    }
+
+			    @Path("/{name}")
+			    @GET
+			    public Message getMessage(String name) {
+			        return null;
+			    }
+
+			    @Path("/greeting")
+			    @PUT
+			    public Response updateGreeting(Message message) {
+			        return null;
+			    }
+			}
+		`);
+
+		assert.deepStrictEqual(
+			endpoints.map((endpoint) => ({
+				className: endpoint.className,
+				methodName: endpoint.methodName,
+				httpMethod: endpoint.httpMethod,
+				path: endpoint.path,
+			})),
+			[
+				{ className: 'GreetResource', methodName: 'getDefaultMessage', httpMethod: 'GET', path: '/greet' },
+				{ className: 'GreetResource', methodName: 'getMessage', httpMethod: 'GET', path: '/greet/{name}' },
+				{ className: 'GreetResource', methodName: 'updateGreeting', httpMethod: 'PUT', path: '/greet/greeting' },
+			]
+		);
+	});
+
+	test('JAX-RS endpoint parser ignores non-endpoint Java methods', () => {
+		const endpoints = parseJavaJaxRsEndpoints(`
+			public class PlainService {
+			    public String greet() {
+			        return "hi";
+			    }
+			}
+		`);
+
+		assert.deepStrictEqual(endpoints, []);
 	});
 
 	test('findHelidonConfigProperty finds known Helidon property metadata', () => {
