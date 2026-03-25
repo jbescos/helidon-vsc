@@ -1472,8 +1472,26 @@ suite('Extension Test Suite', () => {
 			isHelidonDebugSession({
 				type: 'java',
 				name: 'Launch Helidon Application',
-				configuration: { type: 'java', request: 'launch', name: 'Launch Helidon Application' },
-			} as vscode.DebugSession),
+				configuration: {
+					type: 'java',
+					request: 'launch',
+					name: 'Launch Helidon Application',
+					helidonVscManaged: 'helidon-vsc',
+				},
+			} as Pick<vscode.DebugSession, 'type' | 'name' | 'configuration'>),
+			true
+		);
+		assert.strictEqual(
+			isHelidonDebugSession({
+				type: 'java',
+				name: 'io.helidon.Main',
+				configuration: {
+					type: 'java',
+					request: 'launch',
+					name: 'io.helidon.Main',
+					helidonVscManaged: 'helidon-vsc',
+				},
+			} as Pick<vscode.DebugSession, 'type' | 'name' | 'configuration'>),
 			true
 		);
 		assert.strictEqual(
@@ -1546,6 +1564,7 @@ suite('Extension Test Suite', () => {
 			name: 'Launch Helidon Application',
 			request: 'launch',
 			mainClass: 'com.example.Main',
+			helidonVscManaged: 'helidon-vsc',
 			cwd: '${workspaceFolder}',
 			console: 'integratedTerminal',
 			preLaunchTask: 'helidon: build',

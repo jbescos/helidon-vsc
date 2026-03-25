@@ -8,6 +8,7 @@ const execFileAsync = promisify(execFile);
 const HELIDON_BUILD_TASK_LABEL = 'helidon: build';
 const HELIDON_RUN_TASK_LABEL = 'helidon: run';
 export const HELIDON_LAUNCH_CONFIGURATION_NAME = 'Launch Helidon Application';
+const HELIDON_LAUNCH_CONFIGURATION_MARKER = 'helidon-vsc';
 const HELIDON_MICROPROFILE_MAIN_CLASS = 'io.helidon.Main';
 const HELIDON_CLI_COMMAND = 'helidon';
 const HELIDON_CLI_INIT_COMMAND = 'helidon init';
@@ -553,6 +554,7 @@ export function buildHelidonLaunchConfiguration(mainClass: string): vscode.Debug
 		name: HELIDON_LAUNCH_CONFIGURATION_NAME,
 		request: 'launch',
 		mainClass,
+		helidonVscManaged: HELIDON_LAUNCH_CONFIGURATION_MARKER,
 		cwd: '${workspaceFolder}',
 		console: 'integratedTerminal',
 		preLaunchTask: HELIDON_BUILD_TASK_LABEL,
@@ -564,7 +566,8 @@ export function isHelidonDebugSession(
 ): boolean {
 	return (
 		session.type === 'java' &&
-		(session.name === HELIDON_LAUNCH_CONFIGURATION_NAME ||
+		(session.configuration.helidonVscManaged === HELIDON_LAUNCH_CONFIGURATION_MARKER ||
+			session.name === HELIDON_LAUNCH_CONFIGURATION_NAME ||
 			session.configuration.name === HELIDON_LAUNCH_CONFIGURATION_NAME)
 	);
 }
