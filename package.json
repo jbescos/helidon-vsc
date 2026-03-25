@@ -17,6 +17,7 @@
     "onLanguage:yaml",
     "onView:helidonEndpoints",
     "onCommand:helidon-vsc.generateProject",
+    "onCommand:helidon-vsc.generateProjectCliWizard",
     "onCommand:helidon-vsc.generateRunFiles",
     "onCommand:helidon-vsc.refreshEndpoints",
     "onCommand:helidon-vsc.reloadExtension"
@@ -30,6 +31,10 @@
       {
         "command": "helidon-vsc.generateProject",
         "title": "Helidon: Generate Project"
+      },
+      {
+        "command": "helidon-vsc.generateProjectCliWizard",
+        "title": "Helidon: Generate Project with CLI Wizard"
       },
       {
         "command": "helidon-vsc.generateRunFiles",

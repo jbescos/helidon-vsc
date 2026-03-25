@@ -24,7 +24,8 @@ Current feature set:
 - Java code lenses for discovered endpoints
 - Path-parameter go-to-definition for common Helidon request path accessor usages
 - Click-through navigation from endpoint entries back to Java source methods
-- Helidon project generation command using Helidon Maven archetypes
+- Helidon project generation via the Helidon CLI wizard when `helidon` is installed
+- Built-in Helidon Maven archetype project generation fallback
 - `Helidon: Generate Run Files` to create `.vscode/launch.json` and `.vscode/tasks.json` entries for an opened Helidon project
 
 When editing an `application.properties` or `microprofile-config.properties` file, typing prefixes like `server.` will offer Helidon configuration keys such as:
@@ -110,18 +111,38 @@ There is no bundled fallback metadata catalog anymore. If the Java extension is 
 
 The extension now includes **Helidon: Generate Project**.
 
-Current MVP behavior:
+Current behavior:
+
+- the command always shows both project-generation paths:
+  - **Helidon CLI Wizard** for richer archetype and feature selection using `helidon init`
+  - **Maven Archetype Generator** as a built-in fallback
+- if `helidon` is not available on `PATH`, the picker keeps the Helidon CLI option visible but disabled and explains that the CLI was not found on `PATH`
+
+The extension also includes **Helidon: Generate Project with CLI Wizard**.
+
+Current CLI wizard behavior:
+
+- prompts for the target folder where the wizard should run
+- opens an integrated terminal in that folder
+- runs `helidon init`
+- lets the Helidon CLI drive richer selection such as QuickStart / Database / Custom archetypes and the associated feature prompts
+- uses an existing external `helidon` binary on `PATH`; the extension does not bundle or install the CLI itself
+
+Current built-in Maven fallback behavior:
 
 - prompts for target folder
-- prompts for `groupId`, `artifactId`, package, archetype, and version
+- prompts for `groupId`, `artifactId`, package, legacy archetype, and version
 - runs Maven archetype generation with Helidon archetypes from Maven Central
 - opens the generated project in VS Code
 
-Supported archetype choices right now:
+Supported built-in fallback archetype choices right now:
 
 - `helidon-quickstart-se`
 - `helidon-quickstart-mp`
 - `helidon-bare-se`
+- `helidon-bare-mp`
+- `helidon-database-se`
+- `helidon-database-mp`
 
 The extension also includes **Helidon: Generate Run Files**.
 
@@ -145,6 +166,7 @@ Notes:
 - Installing `Extension Pack for Java` is also fine; it includes `redhat.java`
 - This extension declares `redhat.java` as an extension dependency because Helidon metadata loading relies on its Java project/classpath API
 - No separate `java-parser` installation is required by users; `java-parser` is bundled as an internal dependency used for endpoint and path-parameter parsing
+- The richer Helidon project-generation wizard requires the `helidon` CLI to be installed separately and available on `PATH`
 
 ## Extension Settings
 
@@ -157,6 +179,8 @@ No custom settings yet.
 - If the Java workspace is still loading, Helidon metadata may appear a moment later after classpath resolution finishes.
 - Diagnostics are intentionally conservative and do not yet include duplicate-key warnings for `.properties` files.
 - Value validation is intentionally conservative and currently only covers scalar boolean, integer, and long-backed Helidon properties.
+- The CLI-based project-generation wizard currently runs in an integrated terminal and does not yet auto-open the generated project folder after the wizard completes.
+- Post-generation “add Helidon feature/dependency to an existing project” support is not implemented yet.
 - Quick fixes are currently limited to typo corrections, malformed indexed keys, and duplicate YAML key removal.
 - The new scalar/list path diagnostics do not yet have dedicated quick fixes.
 - Java `Config.get(...)` detection is source-pattern-based and intentionally conservative rather than full Java semantic analysis.

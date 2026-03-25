@@ -136,21 +136,42 @@ Implemented a first project generation feature using Helidon archetypes.
 
 Command:
 - `Helidon: Generate Project`
+- `Helidon: Generate Project with CLI Wizard`
 
 Current behavior:
-- prompts for target folder
-- prompts for groupId
-- prompts for artifactId
-- prompts for base package
-- prompts for archetype
-- prompts for version
-- invokes Maven archetype generation
-- opens generated project after success
+- `Helidon: Generate Project`
+  - always shows both project-generation paths:
+    - `Helidon CLI Wizard`
+    - `Maven Archetype Generator`
+  - if `helidon` CLI is not available on `PATH`, keeps the CLI option visible but disabled and explains why
+- `Helidon: Generate Project with CLI Wizard`
+  - prompts for target folder
+  - launches `helidon init` in an integrated terminal
+  - uses the Helidon CLI for richer archetype/feature selection during setup
+- built-in Maven fallback:
+  - prompts for target folder
+  - prompts for groupId
+  - prompts for artifactId
+  - prompts for base package
+  - prompts for archetype
+  - prompts for version
+  - invokes Maven archetype generation
+  - opens generated project after success
 
-Supported archetypes currently:
+Supported built-in fallback archetypes currently:
 - `helidon-quickstart-se`
 - `helidon-quickstart-mp`
 - `helidon-bare-se`
+- `helidon-bare-mp`
+- `helidon-database-se`
+- `helidon-database-mp`
+
+Important scope note:
+- the CLI wizard improves feature selection during project creation, but post-generation “add Helidon feature/dependency to an existing project” support is still not implemented
+- the extension does not bundle the CLI; it shells out to an external `helidon` binary already available on `PATH`
+
+Local environment note:
+- as of March 25, 2026, the Helidon CLI is installed for this workspace at `/home/jbescos/bin/helidon` and resolves on `PATH`
 
 Note:
 - the earlier scaffold/testing command `Helidon: Trigger Config Completion` has been removed
@@ -593,8 +614,8 @@ Status legend:
 
 | Common feature area | Spring | Micronaut | Quarkus | Helidon today | Helidon note |
 | --- | --- | --- | --- | --- | --- |
-| Project generation / starter creation | Yes | Yes | Yes | Partial | `Helidon: Generate Project` exists, but it is still Maven-archetype-based and much narrower than competitor wizards |
-| Framework feature/dependency selection during project setup or afterward | Yes | Yes | Yes | No | Helidon currently offers archetype selection only, not starter-feature/dependency selection |
+| Project generation / starter creation | Yes | Yes | Yes | Partial | Helidon now offers a richer CLI-wizard path plus an expanded built-in Maven fallback, but it is still not at competitor wizard depth |
+| Framework feature/dependency selection during project setup or afterward | Yes | Yes | Yes | Partial | Helidon now supports richer feature selection during setup via the Helidon CLI wizard, but not yet as a first-class existing-project mutator |
 | Framework config authoring in properties/YAML (completion, docs/hover) | Yes | Yes | Yes | Yes | Supported for Helidon properties/YAML files including environment-specific variants |
 | Framework config diagnostics, navigation, and quick fixes | Yes | Partial | Yes | Partial | Helidon has conservative diagnostics, placeholder navigation, and some quick fixes, but coverage is still limited |
 | Framework-aware Java assistance | Yes | Yes | Yes | Partial | Helidon currently supports `Config.get("...")` plus some endpoint/path-aware features, not broader Helidon Java APIs yet |
@@ -668,7 +689,8 @@ Also defer competitor benchmarking until the Helidon extension is in a more comp
 - [x] runtime debug output channel
 - [x] `Helidon: Reload Extension` debug command
 - [x] example/demo project
-- [x] Helidon project generation command using archetypes
+- [x] Helidon project generation command using expanded built-in Maven archetypes
+- [x] Helidon CLI project-generation wizard launcher for richer archetype/feature selection during setup
 - [x] optional `.vscode/launch.json` / `.vscode/tasks.json` helper generation
 
 ### Not implemented yet
@@ -680,6 +702,7 @@ Also defer competitor benchmarking until the Helidon extension is in a more comp
 - [ ] richer path-variable semantics/navigation beyond the current basic accessor matching
 - [ ] richer endpoint inlay/code-lens UX if needed
 - [ ] richer project wizard parity
+- [ ] first-class “add Helidon feature/dependency to existing project” support
 - [ ] richer run/debug/bootstrap parity beyond generated VS Code helpers
 - [ ] deeper Java LS plugin integration (deferred)
 

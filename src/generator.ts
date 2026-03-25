@@ -8,6 +8,10 @@ const execFileAsync = promisify(execFile);
 const HELIDON_BUILD_TASK_LABEL = 'helidon: build';
 const HELIDON_RUN_TASK_LABEL = 'helidon: run';
 const HELIDON_LAUNCH_CONFIGURATION_NAME = 'Launch Helidon Application';
+const HELIDON_CLI_COMMAND = 'helidon';
+const HELIDON_CLI_INIT_COMMAND = 'helidon init';
+const HELIDON_CLI_WIZARD_TERMINAL_NAME = 'Helidon CLI Wizard';
+const HELIDON_CLI_DOCS_URI = vscode.Uri.parse('https://helidon.io/docs/latest/about/cli');
 
 interface GenerateProjectOptions {
 	targetDirectory: string;
@@ -28,20 +32,36 @@ interface TasksJson {
 	tasks: Array<Record<string, unknown>>;
 }
 
-const ARCHETYPES = [
+interface ProjectGenerationModePick extends vscode.QuickPickItem {
+	mode?: 'cli-wizard' | 'maven-archetype';
+}
+
+export const LEGACY_ARCHETYPES = [
 	{ label: 'Helidon Quickstart SE', value: 'helidon-quickstart-se' },
 	{ label: 'Helidon Quickstart MP', value: 'helidon-quickstart-mp' },
 	{ label: 'Helidon Bare SE', value: 'helidon-bare-se' },
-];
+	{ label: 'Helidon Bare MP', value: 'helidon-bare-mp' },
+	{ label: 'Helidon Database SE', value: 'helidon-database-se' },
+	{ label: 'Helidon Database MP', value: 'helidon-database-mp' },
+] as const;
 
-async function promptForOptions(): Promise<GenerateProjectOptions | undefined> {
+async function promptForTargetDirectory(openLabel: string): Promise<string | undefined> {
 	const folderPick = await vscode.window.showOpenDialog({
 		canSelectFolders: true,
 		canSelectFiles: false,
 		canSelectMany: false,
-		openLabel: 'Select target directory for the new Helidon project',
+		openLabel,
 	});
 	if (!folderPick || folderPick.length === 0) {
+		return undefined;
+	}
+
+	return folderPick[0].fsPath;
+}
+
+async function promptForLegacyGeneratorOptions(): Promise<GenerateProjectOptions | undefined> {
+	const targetDirectory = await promptForTargetDirectory('Select target directory for the new Helidon project');
+	if (!targetDirectory) {
 		return undefined;
 	}
 
@@ -75,7 +95,7 @@ async function promptForOptions(): Promise<GenerateProjectOptions | undefined> {
 		return undefined;
 	}
 
-	const archetype = await vscode.window.showQuickPick(ARCHETYPES, {
+	const archetype = await vscode.window.showQuickPick(LEGACY_ARCHETYPES, {
 		placeHolder: 'Choose a Helidon archetype',
 		ignoreFocusOut: true,
 	});
@@ -94,13 +114,164 @@ async function promptForOptions(): Promise<GenerateProjectOptions | undefined> {
 	}
 
 	return {
-		targetDirectory: folderPick[0].fsPath,
+		targetDirectory,
 		groupId,
 		artifactId,
 		packageName,
 		archetypeArtifactId: archetype.value,
 		version,
 	};
+}
+
+async function isHelidonCliAvailable(): Promise<boolean> {
+	try {
+		await execFileAsync(HELIDON_CLI_COMMAND, ['version']);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+export function buildProjectGenerationModePicks(cliAvailable: boolean): ProjectGenerationModePick[] {
+	if (!cliAvailable) {
+		return [
+			{
+				label: 'Helidon CLI Wizard (disabled: helidon not found on PATH)',
+				kind: vscode.QuickPickItemKind.Separator,
+			},
+			{
+				label: 'Maven Archetype Generator',
+				detail:
+					'Uses the built-in fallback generator with the legacy Helidon archetypes available from Maven Central.',
+				mode: 'maven-archetype',
+			},
+		];
+	}
+
+	return [
+		{
+			label: 'Helidon CLI Wizard',
+			description: 'Recommended',
+			detail:
+				'Uses `helidon init` for richer QuickStart/Database/Custom/OCI generation and Helidon-managed feature selection.',
+			mode: 'cli-wizard',
+		},
+		{
+			label: 'Maven Archetype Generator',
+			detail:
+				'Uses the built-in fallback generator with the legacy Helidon archetypes available from Maven Central.',
+			mode: 'maven-archetype',
+		},
+	];
+}
+
+async function promptForProjectGenerationMode(cliAvailable: boolean): Promise<ProjectGenerationModePick | undefined> {
+	return vscode.window.showQuickPick<ProjectGenerationModePick>(
+		buildProjectGenerationModePicks(cliAvailable),
+		{
+			placeHolder: cliAvailable
+				? 'Choose how to generate the Helidon project'
+				: 'Helidon CLI Wizard is unavailable because `helidon` was not found on PATH. Choose the Maven fallback or install the CLI.',
+			ignoreFocusOut: true,
+		}
+	);
+}
+
+async function openHelidonCliDocs(): Promise<void> {
+	await vscode.env.openExternal(HELIDON_CLI_DOCS_URI);
+}
+
+function createHelidonCliWizardTerminal(targetDirectory: string): vscode.Terminal {
+	return vscode.window.createTerminal({
+		name: HELIDON_CLI_WIZARD_TERMINAL_NAME,
+		cwd: targetDirectory,
+	});
+}
+
+async function showHelidonCliUnavailableMessage(): Promise<'fallback' | 'docs' | undefined> {
+	const action = await vscode.window.showWarningMessage(
+		'Helidon CLI was not found on PATH. Install it to use the richer project wizard, or use the built-in Maven archetype generator instead.',
+		'Use Maven Archetype Generator',
+		'Open Helidon CLI Docs'
+	);
+
+	if (action === 'Use Maven Archetype Generator') {
+		return 'fallback';
+	}
+
+	if (action === 'Open Helidon CLI Docs') {
+		await openHelidonCliDocs();
+		return 'docs';
+	}
+
+	return undefined;
+}
+
+export function buildLegacyMavenGenerateArgs(options: GenerateProjectOptions): string[] {
+	return [
+		'archetype:generate',
+		'-B',
+		`-DarchetypeGroupId=io.helidon.archetypes`,
+		`-DarchetypeArtifactId=${options.archetypeArtifactId}`,
+		`-DarchetypeVersion=${options.version}`,
+		`-DgroupId=${options.groupId}`,
+		`-DartifactId=${options.artifactId}`,
+		`-Dpackage=${options.packageName}`,
+		'-DinteractiveMode=false',
+	];
+}
+
+async function generateHelidonProjectWithMavenArchetype(): Promise<void> {
+	const options = await promptForLegacyGeneratorOptions();
+	if (!options) {
+		return;
+	}
+
+	const projectDir = path.join(options.targetDirectory, options.artifactId);
+	try {
+		await fs.access(projectDir);
+		vscode.window.showErrorMessage(`Target directory already exists: ${projectDir}`);
+		return;
+	} catch {
+		// directory does not exist yet
+	}
+
+	vscode.window.showInformationMessage(`Generating Helidon project ${options.artifactId}...`);
+
+	try {
+		await execFileAsync('mvn', buildLegacyMavenGenerateArgs(options), { cwd: options.targetDirectory });
+		const uri = vscode.Uri.file(projectDir);
+		await vscode.commands.executeCommand('vscode.openFolder', uri, true);
+		vscode.window.showInformationMessage(`Helidon project created at ${projectDir}`);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		vscode.window.showErrorMessage(`Failed to generate Helidon project: ${message}`);
+	}
+}
+
+export async function generateHelidonProjectWithCliWizard(): Promise<void> {
+	if (!(await isHelidonCliAvailable())) {
+		const action = await showHelidonCliUnavailableMessage();
+		if (action === 'fallback') {
+			await generateHelidonProjectWithMavenArchetype();
+		}
+		return;
+	}
+
+	const targetDirectory = await promptForTargetDirectory(
+		'Select the directory where the Helidon CLI wizard should create the new project'
+	);
+	if (!targetDirectory) {
+		return;
+	}
+
+	const terminal = createHelidonCliWizardTerminal(targetDirectory);
+	terminal.show(true);
+	terminal.sendText(HELIDON_CLI_INIT_COMMAND);
+
+	vscode.window.showInformationMessage(
+		'Started `helidon init` in an integrated terminal. Use the Helidon CLI prompts to choose archetype and features, then open the generated project folder in VS Code.'
+	);
 }
 
 async function pickWorkspaceFolder(): Promise<vscode.WorkspaceFolder | undefined> {
@@ -208,43 +379,18 @@ async function findMainClass(workspacePath: string): Promise<string | undefined>
 }
 
 export async function generateHelidonProject(): Promise<void> {
-	const options = await promptForOptions();
-	if (!options) {
+	const cliAvailable = await isHelidonCliAvailable();
+	const mode = await promptForProjectGenerationMode(cliAvailable);
+	if (!mode) {
 		return;
 	}
 
-	const projectDir = path.join(options.targetDirectory, options.artifactId);
-	try {
-		await fs.access(projectDir);
-		vscode.window.showErrorMessage(`Target directory already exists: ${projectDir}`);
+	if (mode.mode === 'cli-wizard') {
+		await generateHelidonProjectWithCliWizard();
 		return;
-	} catch {
-		// directory does not exist yet
 	}
 
-	const commandArgs = [
-		'archetype:generate',
-		'-B',
-		`-DarchetypeGroupId=io.helidon.archetypes`,
-		`-DarchetypeArtifactId=${options.archetypeArtifactId}`,
-		`-DarchetypeVersion=${options.version}`,
-		`-DgroupId=${options.groupId}`,
-		`-DartifactId=${options.artifactId}`,
-		`-Dpackage=${options.packageName}`,
-		'-DinteractiveMode=false',
-	];
-
-	vscode.window.showInformationMessage(`Generating Helidon project ${options.artifactId}...`);
-
-	try {
-		await execFileAsync('mvn', commandArgs, { cwd: options.targetDirectory });
-		const uri = vscode.Uri.file(projectDir);
-		await vscode.commands.executeCommand('vscode.openFolder', uri, true);
-		vscode.window.showInformationMessage(`Helidon project created at ${projectDir}`);
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		vscode.window.showErrorMessage(`Failed to generate Helidon project: ${message}`);
-	}
+	await generateHelidonProjectWithMavenArchetype();
 }
 
 export async function generateHelidonRunFiles(): Promise<void> {

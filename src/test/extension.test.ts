@@ -18,6 +18,7 @@ import {
 	replaceHelidonConfigProperties,
 } from '../helidonConfig';
 import { parseJavaConfigReferences } from '../javaConfig';
+import { buildLegacyMavenGenerateArgs, buildProjectGenerationModePicks, LEGACY_ARCHETYPES } from '../generator';
 import { parseHelidonConfigMetadata, type HelidonConfigProperty } from '../metadata';
 import { loadHelidonConfigMetadataFromJavaClasspaths, type JavaExtensionApi } from '../javaMetadata';
 
@@ -940,6 +941,63 @@ suite('Extension Test Suite', () => {
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
+	});
+
+	test('legacy generator exposes the expanded Helidon archetype list', () => {
+		assert.deepStrictEqual(
+			LEGACY_ARCHETYPES.map((archetype) => archetype.value),
+			[
+				'helidon-quickstart-se',
+				'helidon-quickstart-mp',
+				'helidon-bare-se',
+				'helidon-bare-mp',
+				'helidon-database-se',
+				'helidon-database-mp',
+			]
+		);
+	});
+
+	test('project generation picker shows both selectable options when Helidon CLI is available', () => {
+		const picks = buildProjectGenerationModePicks(true);
+		assert.strictEqual(picks.length, 2);
+		assert.strictEqual(picks[0].label, 'Helidon CLI Wizard');
+		assert.strictEqual(picks[0].mode, 'cli-wizard');
+		assert.strictEqual(picks[1].label, 'Maven Archetype Generator');
+		assert.strictEqual(picks[1].mode, 'maven-archetype');
+	});
+
+	test('project generation picker keeps the CLI path visible but disabled when Helidon CLI is missing', () => {
+		const picks = buildProjectGenerationModePicks(false);
+		assert.strictEqual(picks.length, 2);
+		assert.strictEqual(picks[0].label, 'Helidon CLI Wizard (disabled: helidon not found on PATH)');
+		assert.strictEqual(picks[0].kind, vscode.QuickPickItemKind.Separator);
+		assert.strictEqual(picks[0].mode, undefined);
+		assert.strictEqual(picks[1].label, 'Maven Archetype Generator');
+		assert.strictEqual(picks[1].mode, 'maven-archetype');
+	});
+
+	test('legacy generator builds Maven archetype arguments', () => {
+		assert.deepStrictEqual(
+			buildLegacyMavenGenerateArgs({
+				targetDirectory: '/tmp/ignored',
+				groupId: 'com.acme',
+				artifactId: 'demo-helidon',
+				packageName: 'com.acme.demo',
+				archetypeArtifactId: 'helidon-database-mp',
+				version: '4.4.0',
+			}),
+			[
+				'archetype:generate',
+				'-B',
+				'-DarchetypeGroupId=io.helidon.archetypes',
+				'-DarchetypeArtifactId=helidon-database-mp',
+				'-DarchetypeVersion=4.4.0',
+				'-DgroupId=com.acme',
+				'-DartifactId=demo-helidon',
+				'-Dpackage=com.acme.demo',
+				'-DinteractiveMode=false',
+			]
+		);
 	});
 
 	test('classpath metadata loader reads Helidon metadata from directories and jars', async () => {
