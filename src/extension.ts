@@ -145,6 +145,8 @@ export function activate(context: vscode.ExtensionContext) {
 			{ scheme: 'untitled', pattern: '**/microprofile-config.properties' },
 			{ language: 'yaml', scheme: 'file' },
 			{ language: 'yaml', scheme: 'untitled' },
+			{ language: 'java', scheme: 'file' },
+			{ language: 'java', scheme: 'untitled' },
 		],
 		new HelidonConfigCodeActionProvider(),
 		{

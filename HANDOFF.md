@@ -403,6 +403,29 @@ Removed the separate `Helidon: Generate Run Files` command after validating that
 Important scope note:
 - this is a UX cleanup, not a capability removal; the extension still writes the same VS Code launch/task scaffold when starting a Helidon project
 
+### 22. Config diagnostics/quick-fix coverage expansion
+Expanded the existing config diagnostics/quick-fix layer to cover more of the “framework config diagnostics, navigation, and quick fixes” feature area:
+- quick fixes now cover safe key rewrites for path-shape diagnostics when the full key string can be replaced directly
+  - examples: `server.port.value` -> `server.port`, `logging.loggers.name` -> `logging.loggers[0].name`
+- invalid boolean/integer diagnostics now offer metadata-backed replacements when a reliable default or example is available
+- Java `Config.get("...")` diagnostics now participate in the same quick-fix flow as properties/YAML config usage
+- YAML placeholder typo fixes were corrected to preserve the full key rather than incorrectly collapsing to the leaf segment
+
+Important scope note:
+- YAML structural path problems such as nested mappings under a list/scalar key still do not get automatic block-level rewrites
+- duplicate `.properties` key diagnostics are still not implemented in this pass
+
+### 23. Duplicate `.properties` key diagnostics
+Implemented duplicate-key diagnostics for Helidon `.properties` files:
+- duplicate Helidon keys in supported `application*.properties` / `microprofile-config.properties` files are now reported
+- duplicate detection is normalized for equivalent indexed forms
+  - example: `logging.loggers[0].name` and `logging.loggers.0.name` are treated as duplicates
+- duplicate warnings remain conservative and stay scoped to Helidon roots, so unrelated custom application properties are not flagged
+
+Important scope note:
+- this pass adds diagnostics only; there is still no quick fix to remove duplicate `.properties` entries
+- duplicate detection is per file, not cross-file/profile aware
+
 ---
 
 ## Commits created so far
@@ -416,6 +439,10 @@ Important scope note:
 - `a7566fa` — Add Helidon config quick fixes
 - `661a9ee` — Add Helidon path diagnostics
 - `ae7f88e` — Add Helidon value validation
+- `28bb38a` — Add Helidon CLI project generation wizard
+- `ec13033` — Add Helidon run and debug workflow commands
+- `18e4c67` — Add Helidon stop controls and launch shortcuts
+- `b0ee9d8` — Remove redundant Helidon helper commands
 
 ---
 
@@ -664,7 +691,7 @@ Status legend:
 | Project generation / starter creation | Yes | Yes | Yes | Partial | Helidon now offers a richer CLI-wizard path plus an expanded built-in Maven fallback, but it is still not at competitor wizard depth |
 | Framework feature/dependency selection during project setup or afterward | Yes | Yes | Yes | Partial | Helidon now supports richer feature selection during setup via the Helidon CLI wizard, but not yet as a first-class existing-project mutator |
 | Framework config authoring in properties/YAML (completion, docs/hover) | Yes | Yes | Yes | Yes | Supported for Helidon properties/YAML files including environment-specific variants |
-| Framework config diagnostics, navigation, and quick fixes | Yes | Partial | Yes | Partial | Helidon has conservative diagnostics, placeholder navigation, and some quick fixes, but coverage is still limited |
+| Framework config diagnostics, navigation, and quick fixes | Yes | Partial | Yes | Partial | Helidon now covers conservative diagnostics, placeholder/Java navigation, duplicate `.properties`/YAML diagnostics, typo and path-shape fixes, and some default-backed value fixes, but deeper value intelligence and some cleanup fixes are still missing |
 | Framework-aware Java assistance | Yes | Yes | Yes | Partial | Helidon currently supports `Config.get("...")` plus some endpoint/path-aware features, not broader Helidon Java APIs yet |
 | Run/debug workflow integration | Yes | Yes | Yes | Partial | Helidon now has run/debug commands plus generated VS Code launch/tasks scaffolding, but still lacks richer framework-specific dashboards or runtime controls |
 
@@ -715,10 +742,14 @@ Also defer competitor benchmarking until the Helidon extension is in a more comp
 - [x] list missing-index diagnostics for list-backed properties
 - [x] value-level validation for boolean, integer, and long-backed scalar properties
 - [x] placeholder diagnostics/completion/hover/navigation in Helidon config values
+- [x] duplicate Helidon `.properties` key diagnostics in supported properties files
 - [x] duplicate YAML key diagnostics
 - [x] typo-correction quick fixes for strong unknown-key matches
 - [x] malformed indexed-key quick fixes
+- [x] safe quick fixes for scalar/list path-shape diagnostics when the key string can be rewritten directly
+- [x] metadata-backed quick fixes for invalid boolean/integer values when a reliable replacement exists
 - [x] duplicate YAML key removal quick fixes
+- [x] Java-side `Config.get("...")` quick fixes for invalid Helidon config keys
 - [x] endpoint discovery/display/navigation for JAX-RS Java resources
 - [x] endpoint discovery/display/navigation for common Helidon routing/service Java patterns
 - [x] Explorer tree view for Helidon endpoints
@@ -743,8 +774,9 @@ Also defer competitor benchmarking until the Helidon extension is in a more comp
 - [x] `Helidon: Stop Project` helper command
 
 ### Not implemented yet
-- [ ] duplicate `.properties` key diagnostics, if product direction wants them
-- [ ] richer code actions for path-shape and value-level diagnostics
+- [ ] duplicate Helidon `.properties` key removal quick fix
+- [ ] YAML structural quick fixes for nested/list path-shape issues that require block rewrites
+- [ ] broader value-level quick fixes beyond metadata-backed defaults/examples
 - [ ] broader Java-side Helidon config API coverage beyond current `Config.get("...")` support
 - [ ] richer value/reference intelligence for config values and placeholders
 - [ ] endpoint discovery for additional/non-common Helidon patterns beyond the current conservative routing scan
@@ -760,13 +792,12 @@ Also defer competitor benchmarking until the Helidon extension is in a more comp
 ## Recommended next tasks
 Suggested next priorities for the new conversation:
 1. **Remaining richer inspections** for properties and YAML:
-   - decide whether duplicate `.properties` keys should warn at all
    - expand value validation only where metadata makes it reliable enough
    - consider duration/size/enum/class/package validation only if false positives can be avoided
    - improve map-entry/path validation on real-world Helidon metadata
 2. **Richer code actions** for new inspections where safe:
-   - follow-on fixes for scalar/list path-shape issues
-   - any safe value-level correction or normalization helpers
+   - YAML structural rewrites for scalar/list path-shape issues, if they can be made reliable
+   - additional safe value-level correction or normalization helpers beyond defaults/examples
    - possible placeholder/config-key navigation helpers where VS Code UX supports them
 3. **Endpoint support expansion**:
    - expand routing discovery for less-common Helidon patterns
@@ -808,7 +839,11 @@ If inspections are tackled, be conservative because missing classpath metadata c
    - list-backed paths without an index such as `logging.loggers.name=demo`
    - invalid scalar values such as `metrics.enabled=maybe` or `server.port=eighty`
    - placeholder keys such as `server.port=${server.prt}`
+   - duplicate Helidon properties keys such as two `server.port` entries
+   - normalized duplicate Helidon properties keys such as `logging.loggers[0].name` and `logging.loggers.0.name`
    - unknown-key typo quick fix such as `server.prt`
+   - path-shape quick fixes for `server.port.value` and `logging.loggers.name`
+   - value quick fixes for invalid `metrics.enabled` / `server.port` values
    - `src/main/resources/META-INF/microprofile-config.properties` in generated MP projects
    - `application.yaml`
    - `application-prod.yaml`
@@ -817,8 +852,10 @@ If inspections are tackled, be conservative because missing classpath metadata c
    - list-backed YAML mappings without a list item under `logging.loggers`
    - invalid YAML scalar values such as `metrics.enabled: maybe`
    - YAML placeholder values such as `server: { port: ${server.prt} }`
+   - YAML placeholder typo quick fix should preserve the full key, not only the leaf segment
    - duplicate YAML key quick fix
    - Java `Config.get("server.port")` completion / hover / navigation / invalid-key diagnostics
+   - Java `Config.get("server.prt")` quick fix
    - Explorer view → `Helidon Endpoints`
    - click an endpoint entry and confirm it opens the Java method
    - verify routing/service endpoints, not only JAX-RS endpoints

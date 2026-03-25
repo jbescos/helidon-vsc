@@ -305,6 +305,20 @@ function duplicateYamlKeyDiagnostic(target: ConfigKeyDiagnosticTarget): vscode.D
 	return diagnostic;
 }
 
+function duplicatePropertiesKeyDiagnostic(
+	target: ConfigKeyDiagnosticTarget,
+	firstLineIndex: number,
+): vscode.Diagnostic {
+	const diagnostic = new vscode.Diagnostic(
+		target.range,
+		`Duplicate Helidon configuration key '${target.key}'. Previous declaration is on line ${firstLineIndex + 1}.`,
+		vscode.DiagnosticSeverity.Warning
+	);
+	diagnostic.source = 'helidon-vsc';
+	diagnostic.code = 'duplicate-properties-key';
+	return diagnostic;
+}
+
 function pathValidationDiagnostic(target: ConfigKeyDiagnosticTarget, issue: PathValidationIssue): vscode.Diagnostic {
 	const diagnostic = new vscode.Diagnostic(target.range, issue.message, vscode.DiagnosticSeverity.Warning);
 	diagnostic.source = 'helidon-vsc';
@@ -515,6 +529,33 @@ function unknownKeyFromDiagnostic(diagnostic: vscode.Diagnostic): string | undef
 
 	const match = /^Unknown Helidon configuration key '(.+)'\.$/u.exec(diagnostic.message);
 	return match?.[1];
+}
+
+function propertyKeyFromValueDiagnostic(diagnostic: vscode.Diagnostic): string | undefined {
+	if (typeof diagnostic.code !== 'string') {
+		return undefined;
+	}
+
+	if (diagnostic.code !== 'invalid-boolean-value' && diagnostic.code !== 'invalid-integer-value') {
+		return undefined;
+	}
+
+	const match = /^Helidon configuration value for '(.+)' must /u.exec(diagnostic.message);
+	return match?.[1];
+}
+
+function rangesEqual(left: vscode.Range, right: vscode.Range): boolean {
+	return left.start.isEqual(right.start) && left.end.isEqual(right.end);
+}
+
+function isPlaceholderKeyRange(document: vscode.TextDocument, range: vscode.Range): boolean {
+	if (range.start.line !== range.end.line) {
+		return false;
+	}
+
+	const line = document.lineAt(range.start.line).text;
+	const lineRange = new vscode.Range(range.start.line, 0, range.start.line, line.length);
+	return placeholderReferences(line, lineRange).some((reference) => rangesEqual(reference.range, range));
 }
 
 function normalizedScalarValue(value: string): string {
@@ -969,7 +1010,9 @@ function codeActionsForUnknownKey(document: vscode.TextDocument, diagnostic: vsc
 	}
 
 	const replacement =
-		isHelidonYamlDocument(document) && suggestion.includes('.')
+		isHelidonYamlDocument(document) &&
+		!isPlaceholderKeyRange(document, diagnostic.range) &&
+		suggestion.includes('.')
 			? suggestion.split('.').at(-1) ?? suggestion
 			: suggestion;
 
@@ -982,6 +1025,144 @@ function codeActionsForUnknownKey(document: vscode.TextDocument, diagnostic: vsc
 			diagnostic
 		),
 	];
+}
+
+function listIndexReplacementForKey(
+	key: string,
+	listPropertyKey: string,
+	preferBracketNotation: boolean,
+): string | undefined {
+	const normalizedKey = normalizeConfigKey(key);
+	const normalizedListKey = normalizeConfigKey(listPropertyKey);
+	if (!normalizedKey.startsWith(`${normalizedListKey}.`)) {
+		return undefined;
+	}
+
+	const suffix = normalizedKey.slice(normalizedListKey.length);
+	if (!suffix.startsWith('.')) {
+		return undefined;
+	}
+
+	return preferBracketNotation ? `${listPropertyKey}[0]${suffix}` : `${listPropertyKey}.0${suffix}`;
+}
+
+function pathDiagnosticReplacement(document: vscode.TextDocument, diagnostic: vscode.Diagnostic): string | undefined {
+	if (typeof diagnostic.code !== 'string') {
+		return undefined;
+	}
+
+	if (isHelidonYamlDocument(document) && !isPlaceholderKeyRange(document, diagnostic.range)) {
+		return undefined;
+	}
+
+	const currentKey = document.getText(diagnostic.range).trim();
+	if (currentKey.length === 0) {
+		return undefined;
+	}
+
+	switch (diagnostic.code) {
+		case 'nested-key-under-scalar-property':
+		case 'map-property-invalid-nested-key':
+			return propertyForNormalizedKey(currentKey)?.key;
+		case 'list-property-missing-index': {
+			const matchedProperty = resolveHelidonConfigKey(currentKey).matchedProperty;
+			if (!matchedProperty) {
+				return undefined;
+			}
+
+			return listIndexReplacementForKey(
+				currentKey,
+				matchedProperty.key,
+				isHelidonPropertiesDocument(document)
+			);
+		}
+		default:
+			return undefined;
+	}
+}
+
+function codeActionsForPathDiagnostic(
+	document: vscode.TextDocument,
+	diagnostic: vscode.Diagnostic,
+): vscode.CodeAction[] {
+	const replacement = pathDiagnosticReplacement(document, diagnostic);
+	if (!replacement || replacement === document.getText(diagnostic.range)) {
+		return [];
+	}
+
+	return [
+		createCodeAction(
+			`Change to '${replacement}'`,
+			vscode.CodeActionKind.QuickFix,
+			document,
+			[{ range: diagnostic.range, newText: replacement }],
+			diagnostic
+		),
+	];
+}
+
+function codeActionsForValueDiagnostic(
+	document: vscode.TextDocument,
+	diagnostic: vscode.Diagnostic,
+): vscode.CodeAction[] {
+	const propertyKey = propertyKeyFromValueDiagnostic(diagnostic);
+	if (!propertyKey) {
+		return [];
+	}
+
+	const property = findHelidonConfigProperty(propertyKey);
+	if (!property) {
+		return [];
+	}
+
+	const actions: vscode.CodeAction[] = [];
+	if (diagnostic.code === 'invalid-boolean-value') {
+		const candidates = new Set<string>();
+		if (property.defaultValue && /^(true|false)$/iu.test(property.defaultValue)) {
+			candidates.add(property.defaultValue.toLowerCase());
+		}
+		candidates.add('true');
+		candidates.add('false');
+
+		for (const candidate of candidates) {
+			actions.push(
+				createCodeAction(
+					property.defaultValue?.toLowerCase() === candidate
+						? `Replace with default '${candidate}'`
+						: `Replace with '${candidate}'`,
+					vscode.CodeActionKind.QuickFix,
+					document,
+					[{ range: diagnostic.range, newText: candidate }],
+					diagnostic
+				)
+			);
+		}
+		return actions;
+	}
+
+	const integerCandidates = new Set<string>();
+	if (property.defaultValue && /^[+-]?\d+$/u.test(property.defaultValue)) {
+		integerCandidates.add(property.defaultValue);
+	}
+	if (property.example && /^[+-]?\d+$/u.test(property.example)) {
+		integerCandidates.add(property.example);
+	}
+
+	for (const candidate of integerCandidates) {
+		actions.push(
+			createCodeAction(
+				property.defaultValue === candidate
+					? `Replace with default '${candidate}'`
+					: `Replace with example '${candidate}'`,
+				vscode.CodeActionKind.QuickFix,
+				document,
+				[{ range: diagnostic.range, newText: candidate }],
+				diagnostic
+			)
+		);
+	}
+
+	return actions;
 }
 
 function currentYamlPath(document: vscode.TextDocument, position: vscode.Position): string[] {
@@ -1153,6 +1334,7 @@ export function collectHelidonPropertiesDiagnostics(document: vscode.TextDocumen
 	}
 
 	const diagnostics: vscode.Diagnostic[] = [];
+	const seenKeys = new Map<string, { lineIndex: number }>();
 
 	for (let lineIndex = 0; lineIndex < document.lineCount; lineIndex++) {
 		const line = document.lineAt(lineIndex).text;
@@ -1181,6 +1363,15 @@ export function collectHelidonPropertiesDiagnostics(document: vscode.TextDocumen
 
 		if (!shouldValidateHelidonConfigKey(analyzedKey.normalizedKey)) {
 			continue;
+		}
+
+		const firstSeen = seenKeys.get(analyzedKey.normalizedKey);
+		if (firstSeen) {
+			diagnostics.push(
+				duplicatePropertiesKeyDiagnostic({ key, range: keyRange }, firstSeen.lineIndex)
+			);
+		} else {
+			seenKeys.set(analyzedKey.normalizedKey, { lineIndex });
 		}
 
 		if (!isKnownHelidonConfigKey(analyzedKey.normalizedKey)) {
@@ -1284,7 +1475,7 @@ export class HelidonConfigCodeActionProvider implements vscode.CodeActionProvide
 		_range: vscode.Range | vscode.Selection,
 		context: vscode.CodeActionContext,
 	): vscode.ProviderResult<vscode.CodeAction[]> {
-		if (!isHelidonPropertiesDocument(document) && !isHelidonYamlDocument(document)) {
+		if (!isHelidonPropertiesDocument(document) && !isHelidonYamlDocument(document) && document.languageId !== 'java') {
 			return undefined;
 		}
 
@@ -1292,6 +1483,8 @@ export class HelidonConfigCodeActionProvider implements vscode.CodeActionProvide
 			...codeActionsForIndexedDiagnostic(document, diagnostic),
 			...codeActionsForDuplicateYamlKey(document, diagnostic),
 			...codeActionsForUnknownKey(document, diagnostic),
+			...codeActionsForPathDiagnostic(document, diagnostic),
+			...codeActionsForValueDiagnostic(document, diagnostic),
 		]);
 	}
 }

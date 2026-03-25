@@ -15,11 +15,14 @@ Current feature set:
 - Missing-list-index diagnostics for list-backed Helidon properties
 - Value-level diagnostics for boolean and integer-like Helidon properties
 - Placeholder key diagnostics, completion, hover, and go-to-definition for `${...}` references in Helidon config values
+- Duplicate Helidon `.properties` key diagnostics in supported properties files
 - Duplicate YAML key diagnostics in `application.yaml` / `application.yml`
 - Quick fixes for unknown-key typos when a strong Helidon metadata match exists
 - Quick fixes for malformed indexed properties keys
+- Quick fixes for path-shape issues when the Helidon key can be safely rewritten
+- Default-backed quick fixes for invalid boolean/integer config values when metadata provides a reliable replacement
 - Quick fixes to remove duplicate YAML keys
-- Java completion, hover, diagnostics, and go-to-definition for Helidon `Config.get("...")` keys
+- Java completion, hover, diagnostics, go-to-definition, and quick fixes for Helidon `Config.get("...")` keys
 - Explorer view for Helidon endpoints discovered from JAX-RS resources and Helidon routing/service patterns
 - Java code lenses for discovered endpoints
 - Path-parameter go-to-definition for common Helidon request path accessor usages
@@ -71,15 +74,18 @@ Diagnostics currently cover:
 - missing indexes before nested list-backed keys such as `logging.loggers.name`
 - invalid values for known boolean, integer, and long-backed properties such as `metrics.enabled=maybe` or `server.port=eighty`
 - invalid placeholder keys under known Helidon config roots such as `${server.prt}`
+- duplicate Helidon keys within the same `.properties` file
 - duplicate YAML keys within the same mapping
 
 Quick fixes currently cover:
 
 - typo correction for unknown keys when the metadata match is strong enough
 - malformed indexed properties keys by inserting `]` or replacing invalid brackets with `[0]`
+- safe rewrites for scalar/list path-shape issues such as `server.port.value` or `logging.loggers.name`
+- metadata-default replacements for invalid boolean/integer values when a reliable default is known
 - duplicate YAML key removal
 
-Diagnostics currently do not warn for duplicate keys in Java `.properties` files. Those files commonly use last-one-wins semantics, so duplicate-key inspection there is still undecided.
+Duplicate `.properties` key diagnostics are intentionally limited to Helidon roots in supported Helidon properties files. There is no duplicate-key quick fix for `.properties` files yet.
 
 ## Endpoint discovery
 
@@ -188,14 +194,14 @@ No custom settings yet.
 - Completion and hover support are currently scoped to Helidon-style `application*.properties`, `microprofile-config.properties`, `application*.yaml`, and `application*.yml` files.
 - Completion, hover, and diagnostics depend on Java classpath metadata being available from `redhat.java`.
 - If the Java workspace is still loading, Helidon metadata may appear a moment later after classpath resolution finishes.
-- Diagnostics are intentionally conservative and do not yet include duplicate-key warnings for `.properties` files.
+- Duplicate `.properties` key diagnostics are intentionally conservative and scoped to Helidon roots in supported Helidon properties files.
 - Value validation is intentionally conservative and currently only covers scalar boolean, integer, and long-backed Helidon properties.
 - The CLI-based project-generation wizard currently runs in an integrated terminal and does not yet auto-open the generated project folder after the wizard completes.
 - Post-generation “add Helidon feature/dependency to an existing project” support is not implemented yet.
 - Run/debug main-class resolution is intentionally conservative; if no Java main class is found and the project does not look like a Helidon MicroProfile project, the run/debug commands will not start.
-- Quick fixes are currently limited to typo corrections, malformed indexed keys, and duplicate YAML key removal.
-- The new scalar/list path diagnostics do not yet have dedicated quick fixes.
-- Java `Config.get(...)` detection is source-pattern-based and intentionally conservative rather than full Java semantic analysis.
+- There is no quick fix yet to remove duplicate Helidon `.properties` keys.
+- Quick fixes are intentionally conservative and still do not attempt structural YAML rewrites for nested/list path issues.
+- Java `Config.get(...)` detection and related quick fixes are source-pattern-based and intentionally conservative rather than full Java semantic analysis.
 
 ## Release Notes
 
