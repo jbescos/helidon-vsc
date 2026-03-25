@@ -1,6 +1,7 @@
 export interface HelidonConfigProperty {
 	key: string;
 	type: string;
+	kind?: 'VALUE' | 'LIST' | 'MAP';
 	defaultValue?: string;
 	description: string;
 	example?: string;
@@ -67,6 +68,7 @@ function flattenType(
 			properties.push({
 				key,
 				type: optionKind === 'LIST' ? `list<${optionType}>` : optionType,
+				kind: optionKind,
 				defaultValue: option.defaultValue,
 				description: option.description ?? '',
 				example: option.defaultValue,

@@ -8,6 +8,7 @@ let normalizedHelidonConfigKeys = new Set<string>();
 let normalizedHelidonConfigPrefixes = new Set<string>();
 let helidonConfigRoots = new Set<string>();
 let normalizedHelidonConfigKeyMap = new Map<string, string[]>();
+let normalizedHelidonConfigPropertyByKey = new Map<string, HelidonConfigProperty>();
 const YAML_KEY_SEGMENT_PATTERN = /[A-Za-z0-9_-]+/;
 
 interface ConfigKeyDiagnosticTarget {
@@ -37,6 +38,11 @@ interface IndexedKeyAnalysis {
 	diagnostic?: IndexedKeyDiagnostic;
 }
 
+interface PathValidationIssue {
+	code: string;
+	message: string;
+}
+
 function propertyMarkdown(property: HelidonConfigProperty): vscode.MarkdownString {
 	const markdown = new vscode.MarkdownString(undefined, true);
 	markdown.appendMarkdown(`**${property.key}**\n\n`);
@@ -58,11 +64,15 @@ function rebuildHelidonConfigIndexes(properties: readonly HelidonConfigProperty[
 	normalizedHelidonConfigPrefixes = new Set(properties.flatMap((property) => configKeyPrefixes(property.key)));
 	helidonConfigRoots = new Set(properties.map((property) => normalizeConfigKey(property.key).split('.')[0]));
 	normalizedHelidonConfigKeyMap = new Map<string, string[]>();
+	normalizedHelidonConfigPropertyByKey = new Map<string, HelidonConfigProperty>();
 	for (const property of properties) {
 		const normalizedKey = normalizeConfigKey(property.key);
 		const keys = normalizedHelidonConfigKeyMap.get(normalizedKey) ?? [];
 		keys.push(property.key);
 		normalizedHelidonConfigKeyMap.set(normalizedKey, keys);
+		if (!normalizedHelidonConfigPropertyByKey.has(normalizedKey)) {
+			normalizedHelidonConfigPropertyByKey.set(normalizedKey, property);
+		}
 	}
 }
 
@@ -162,6 +172,13 @@ function duplicateYamlKeyDiagnostic(target: ConfigKeyDiagnosticTarget): vscode.D
 	return diagnostic;
 }
 
+function pathValidationDiagnostic(target: ConfigKeyDiagnosticTarget, issue: PathValidationIssue): vscode.Diagnostic {
+	const diagnostic = new vscode.Diagnostic(target.range, issue.message, vscode.DiagnosticSeverity.Warning);
+	diagnostic.source = 'helidon-vsc';
+	diagnostic.code = issue.code;
+	return diagnostic;
+}
+
 function levenshteinDistance(left: string, right: string): number {
 	if (left === right) {
 		return 0;
@@ -216,6 +233,18 @@ function preferredKeyForNormalizedKey(normalizedKey: string): string | undefined
 	}
 
 	return keys[0];
+}
+
+function propertyForNormalizedKey(normalizedKey: string): HelidonConfigProperty | undefined {
+	return normalizedHelidonConfigPropertyByKey.get(normalizedKey);
+}
+
+function isListProperty(property: HelidonConfigProperty): boolean {
+	return property.kind === 'LIST' || property.type.startsWith('list<');
+}
+
+function isMapProperty(property: HelidonConfigProperty): boolean {
+	return property.kind === 'MAP';
 }
 
 function suggestHelidonConfigKey(key: string): string | undefined {
@@ -326,6 +355,40 @@ function analyzeIndexedConfigKey(key: string): IndexedKeyAnalysis {
 	return {
 		normalizedKey: normalizedSegments.join('.'),
 	};
+}
+
+function pathValidationIssueForKey(key: string): PathValidationIssue | undefined {
+	const normalizedKey = normalizeConfigKey(key);
+	const segments = normalizedKey.split('.').filter((segment) => segment.length > 0);
+	if (segments.length < 2) {
+		return undefined;
+	}
+
+	for (let index = 1; index < segments.length; index++) {
+		const prefix = segments.slice(0, index).join('.');
+		const property = propertyForNormalizedKey(prefix);
+		if (!property) {
+			continue;
+		}
+
+		const preferredKey = preferredKeyForNormalizedKey(prefix) ?? prefix;
+		const nextSegment = segments[index];
+		if (isListProperty(property) && nextSegment !== '0') {
+			return {
+				code: 'list-property-missing-index',
+				message: `Helidon configuration list '${preferredKey}' requires an index before nested keys.`,
+			};
+		}
+
+		if (!isMapProperty(property) && !isListProperty(property) && !normalizedHelidonConfigPrefixes.has(prefix)) {
+			return {
+				code: 'nested-key-under-scalar-property',
+				message: `Helidon configuration key '${preferredKey}' does not support nested keys.`,
+			};
+		}
+	}
+
+	return undefined;
 }
 
 function unknownKeyFromDiagnostic(diagnostic: vscode.Diagnostic): string | undefined {
@@ -748,6 +811,12 @@ export function collectHelidonPropertiesDiagnostics(document: vscode.TextDocumen
 
 		const keyStart = line.indexOf(key);
 		const range = new vscode.Range(lineIndex, keyStart, lineIndex, keyStart + key.length);
+		const pathIssue = pathValidationIssueForKey(analyzedKey.normalizedKey);
+		if (pathIssue) {
+			diagnostics.push(pathValidationDiagnostic({ key, range }, pathIssue));
+			continue;
+		}
+
 		diagnostics.push(unknownHelidonConfigDiagnostic({ key, range }));
 	}
 
@@ -762,8 +831,15 @@ export function collectHelidonYamlDiagnostics(document: vscode.TextDocument): vs
 	return [
 		...collectDuplicateYamlKeyDiagnostics(document),
 		...yamlKeyEntries(document)
-		.filter((entry) => shouldValidateHelidonConfigKey(entry.key) && !isKnownHelidonConfigKey(entry.key))
-		.map(unknownHelidonConfigDiagnostic),
+			.filter((entry) => shouldValidateHelidonConfigKey(entry.key) && !isKnownHelidonConfigKey(entry.key))
+			.map((entry) => {
+				const pathIssue = pathValidationIssueForKey(entry.key);
+				if (pathIssue) {
+					return pathValidationDiagnostic(entry, pathIssue);
+				}
+
+				return unknownHelidonConfigDiagnostic(entry);
+			}),
 	];
 }
 

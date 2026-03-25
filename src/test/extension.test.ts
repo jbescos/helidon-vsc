@@ -127,27 +127,44 @@ const TEST_PROPERTIES: HelidonConfigProperty[] = [
 	{
 		key: 'server.port',
 		type: 'java.lang.Integer',
+		kind: 'VALUE',
 		defaultValue: '8080',
 		description: 'Server port',
 	},
 	{
+		key: 'logging.loggers',
+		type: 'list<example.LoggerConfig>',
+		kind: 'LIST',
+		description: 'Logger list',
+	},
+	{
 		key: 'logging.loggers.0.name',
 		type: 'java.lang.String',
+		kind: 'VALUE',
 		description: 'Logger name',
 	},
 	{
 		key: 'logging.level',
 		type: 'java.lang.String',
+		kind: 'VALUE',
 		description: 'Logging level',
 	},
 	{
 		key: 'logging.loggers.0.level',
 		type: 'java.lang.String',
+		kind: 'VALUE',
 		description: 'Logger level',
+	},
+	{
+		key: 'security.providers',
+		type: 'list<example.ProviderConfig>',
+		kind: 'LIST',
+		description: 'Security providers',
 	},
 	{
 		key: 'security.providers.0.oidc.client-id',
 		type: 'java.lang.String',
+		kind: 'VALUE',
 		description: 'OIDC client id',
 	},
 ];
@@ -298,6 +315,44 @@ suite('Extension Test Suite', () => {
 		}
 	});
 
+	test('properties diagnostics report nested keys under scalar properties', async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'helidon-vsc-properties-scalar-path-'));
+		try {
+			const filePath = path.join(tempRoot, 'microprofile-config.properties');
+			await fs.writeFile(filePath, 'server.port.value=8080', 'utf8');
+			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+
+			seedTestMetadata();
+			const diagnostics = collectHelidonPropertiesDiagnostics(document);
+			assert.strictEqual(diagnostics.length, 1);
+			assert.strictEqual(
+				diagnostics[0].message,
+				"Helidon configuration key 'server.port' does not support nested keys."
+			);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test('properties diagnostics report missing list indexes before nested keys', async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'helidon-vsc-properties-list-path-'));
+		try {
+			const filePath = path.join(tempRoot, 'microprofile-config.properties');
+			await fs.writeFile(filePath, 'logging.loggers.name=demo', 'utf8');
+			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+
+			seedTestMetadata();
+			const diagnostics = collectHelidonPropertiesDiagnostics(document);
+			assert.strictEqual(diagnostics.length, 1);
+			assert.strictEqual(
+				diagnostics[0].message,
+				"Helidon configuration list 'logging.loggers' requires an index before nested keys."
+			);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
 	test('yaml diagnostics warn for unknown keys under known Helidon roots', async () => {
 		const document = await vscode.workspace.openTextDocument({
 			language: 'yaml',
@@ -329,6 +384,44 @@ suite('Extension Test Suite', () => {
 		seedTestMetadata();
 		const diagnostics = collectHelidonYamlDiagnostics(document);
 		assert.strictEqual(diagnostics.length, 0);
+	});
+
+	test('yaml diagnostics report nested keys under scalar properties', async () => {
+		const document = await vscode.workspace.openTextDocument({
+			language: 'yaml',
+			content: [
+				'server:',
+				'  port:',
+				'    value: 8080',
+			].join('\n'),
+		});
+
+		seedTestMetadata();
+		const diagnostics = collectHelidonYamlDiagnostics(document);
+		assert.strictEqual(diagnostics.length, 1);
+		assert.strictEqual(
+			diagnostics[0].message,
+			"Helidon configuration key 'server.port' does not support nested keys."
+		);
+	});
+
+	test('yaml diagnostics report missing list indexes before nested keys', async () => {
+		const document = await vscode.workspace.openTextDocument({
+			language: 'yaml',
+			content: [
+				'logging:',
+				'  loggers:',
+				'    name: demo',
+			].join('\n'),
+		});
+
+		seedTestMetadata();
+		const diagnostics = collectHelidonYamlDiagnostics(document);
+		assert.strictEqual(diagnostics.length, 1);
+		assert.strictEqual(
+			diagnostics[0].message,
+			"Helidon configuration list 'logging.loggers' requires an index before nested keys."
+		);
 	});
 
 	test('yaml diagnostics report duplicate keys in the same mapping', async () => {

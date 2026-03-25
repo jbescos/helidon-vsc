@@ -214,6 +214,23 @@ Current scope note:
 - no quick fix yet for duplicate `.properties` keys because that inspection does not exist
 - no quick fix yet for unresolved map/path validation or value/reference validation
 
+### 12. Path-shape validation pass
+Implemented a conservative metadata-backed path validation step:
+- scalar-property nested path diagnostics
+  - example: `server.port.value`
+  - reports that `server.port` does not support nested keys
+- list-property missing-index diagnostics
+  - example: `logging.loggers.name`
+  - reports that `logging.loggers` requires an index before nested keys
+- YAML equivalents work too
+  - nested map content under scalar properties is flagged
+  - nested mapping under list-backed properties without a list item/index is flagged
+
+Important scope note:
+- this validation relies on metadata `kind` being preserved as `VALUE` / `LIST` / `MAP`
+- `MAP` properties are intentionally excluded from the scalar-path warning to avoid false positives
+- quick fixes are not implemented yet for these new path-shape diagnostics
+
 ---
 
 ## Commits created so far
@@ -341,6 +358,7 @@ Current VS Code parity status against the JetBrains plugin:
   - hover/documentation
   - conservative unknown-key diagnostics
   - indexed properties-key syntax diagnostics
+  - scalar/list path-shape diagnostics
   - duplicate YAML key diagnostics
   - basic quick fixes/code actions for typo corrections, indexed-key fixes, and duplicate YAML key removal
   - project generation command
@@ -383,6 +401,8 @@ So for the next conversation, do **not** center the work around a deeper JDT LS 
 - [x] `application.yaml` / `application.yml` hover
 - [x] conservative diagnostics for unknown Helidon keys in supported properties/YAML files
 - [x] indexed properties-key syntax diagnostics (`[]`, missing `]`, non-integer index)
+- [x] scalar nested-path diagnostics for unsupported child keys under leaf properties
+- [x] list missing-index diagnostics for list-backed properties
 - [x] duplicate YAML key diagnostics
 - [x] typo-correction quick fixes for strong unknown-key matches
 - [x] malformed indexed-key quick fixes
@@ -398,10 +418,9 @@ So for the next conversation, do **not** center the work around a deeper JDT LS 
 - [x] Helidon project generation command using archetypes
 
 ### Not implemented yet
-- [ ] unresolved map/path validation where metadata is strong enough
 - [ ] value-level validation where hints/metadata allow it
 - [ ] duplicate `.properties` key diagnostics, if product direction wants them
-- [ ] richer code actions for future inspections
+- [ ] richer code actions for path-shape diagnostics and future inspections
 - [ ] endpoint discovery / display
 - [ ] Java-side Helidon references / navigation
 - [ ] value/reference intelligence for config values and placeholders
@@ -415,11 +434,10 @@ So for the next conversation, do **not** center the work around a deeper JDT LS 
 ## Recommended next tasks
 Suggested next priorities for the new conversation:
 1. **Remaining richer inspections** for properties and YAML:
-   - unresolved map/path validation where metadata is strong enough
    - value-level validation where hints/metadata allow it
    - decide whether duplicate `.properties` keys should warn at all
 2. **Richer code actions** for new inspections where safe:
-   - follow-on fixes for unresolved map/path issues
+   - follow-on fixes for scalar/list path-shape issues
    - any safe value-level correction or normalization helpers
 3. **Endpoint discovery / display**:
    - discover Helidon routes/endpoints from Java
@@ -453,11 +471,15 @@ If inspections are tackled, be conservative because missing classpath metadata c
 3. In Extension Development Host, open `/home/jbescos/workspace/demo-helidon` or `/home/jbescos/workspace/helidon-vsc-example`
 4. Test:
    - `application.properties`
-   - malformed indexed properties keys such as `logging.loggers[].name=value`
+    - malformed indexed properties keys such as `logging.loggers[].name=value`
+   - scalar nested paths such as `server.port.value=8080`
+   - list-backed paths without an index such as `logging.loggers.name=demo`
    - unknown-key typo quick fix such as `server.prt`
    - `src/main/resources/META-INF/microprofile-config.properties` in generated MP projects
    - `application.yaml`
-   - duplicate YAML keys in the same mapping
+    - duplicate YAML keys in the same mapping
+   - scalar nested YAML paths such as `server: { port: { value: 8080 } }`
+   - list-backed YAML mappings without a list item under `logging.loggers`
    - duplicate YAML key quick fix
    - output panel → `Helidon`
    - command palette → `Helidon: Generate Project`

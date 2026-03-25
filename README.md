@@ -13,6 +13,8 @@ Current MVP feature:
 - Conservative diagnostics for unknown Helidon configuration keys in `application.properties` / `microprofile-config.properties`
 - Conservative diagnostics for unknown Helidon configuration keys in `application.yaml` / `application.yml`
 - Indexed-key syntax diagnostics in `application.properties` / `microprofile-config.properties`
+- Nested-path diagnostics for scalar Helidon properties
+- Missing-list-index diagnostics for list-backed Helidon properties
 - Duplicate YAML key diagnostics in `application.yaml` / `application.yml`
 - Quick fixes for unknown-key typos when a strong Helidon metadata match exists
 - Quick fixes for malformed indexed properties keys
@@ -56,6 +58,8 @@ Diagnostics currently cover:
 
 - unknown keys under known Helidon config roots such as `server`, `logging`, or `security`, which keeps custom application properties out of the warning stream
 - malformed indexed properties keys such as missing `]`, empty `[]`, or non-integer indexes
+- nested keys under scalar Helidon properties such as `server.port.value`
+- missing indexes before nested list-backed keys such as `logging.loggers.name`
 - duplicate YAML keys within the same mapping
 
 Quick fixes currently cover:
@@ -107,6 +111,7 @@ No custom settings yet.
 - If the Java workspace is still loading, Helidon metadata may appear a moment later after classpath resolution finishes.
 - Diagnostics are intentionally conservative and do not yet include duplicate-key warnings for `.properties` files or value/reference validation.
 - Quick fixes are currently limited to typo corrections, malformed indexed keys, and duplicate YAML key removal.
+- The new scalar/list path diagnostics do not yet have dedicated quick fixes.
 
 ## Release Notes
 
