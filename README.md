@@ -21,6 +21,20 @@ This extension currently covers:
 - Optional: `helidon` on `PATH` for the Helidon CLI wizard
 - Optional: Maven or Gradle installed for project generation and run/debug
 
+## Java Language Server Integration
+
+The requirement to use the same language server as the official Java extension is satisfied by integrating with `Language Support for Java(TM) by Red Hat` (`redhat.java`).
+
+That extension already owns the Java language-server integration in VS Code and is the supported entry point for JDT LS features such as classpath resolution, Java project import, launch/debug configuration resolution, and workspace commands.
+
+Because of that, `helidon-vsc` does not bundle or launch a separate `java-language-server`. Doing so would duplicate the Java workspace model, risk conflicting project state, and move the extension away from the Java stack that VS Code users already rely on.
+
+In practice, `helidon-vsc` reuses the Java tooling that `redhat.java` exposes:
+
+- Java classpath and metadata loading comes from the Red Hat Java extension API
+- Java run/debug uses the same Java debugger launch flow as the VS Code Java tooling
+- MicroProfile support is delegated to `redhat.vscode-microprofile` where that stack is already deeper than Helidon-specific custom features
+
 ## Features
 
 ### 1. Helidon `.properties` support
