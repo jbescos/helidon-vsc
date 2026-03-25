@@ -231,6 +231,20 @@ Important scope note:
 - `MAP` properties are intentionally excluded from the scalar-path warning to avoid false positives
 - quick fixes are not implemented yet for these new path-shape diagnostics
 
+### 13. First value-validation pass
+Implemented a conservative value-validation step for known scalar properties:
+- boolean validation
+  - example invalid value: `metrics.enabled=maybe`
+- integer/long validation
+  - example invalid values: `server.port=eighty`, `server.max-payload-size=12kb`
+- works in both properties and YAML files
+- quoted YAML scalars such as `"8080"` and `"false"` are accepted for these validations
+
+Important scope note:
+- validation is currently limited to `java.lang.Boolean`, `java.lang.Integer`, and `java.lang.Long`
+- more complex types such as duration, size, enums, placeholders, or references are still not validated
+- there are no quick fixes yet for invalid scalar values
+
 ---
 
 ## Commits created so far
@@ -359,6 +373,7 @@ Current VS Code parity status against the JetBrains plugin:
   - conservative unknown-key diagnostics
   - indexed properties-key syntax diagnostics
   - scalar/list path-shape diagnostics
+  - basic value-level validation for boolean and integer-like scalar properties
   - duplicate YAML key diagnostics
   - basic quick fixes/code actions for typo corrections, indexed-key fixes, and duplicate YAML key removal
   - project generation command
@@ -403,6 +418,7 @@ So for the next conversation, do **not** center the work around a deeper JDT LS 
 - [x] indexed properties-key syntax diagnostics (`[]`, missing `]`, non-integer index)
 - [x] scalar nested-path diagnostics for unsupported child keys under leaf properties
 - [x] list missing-index diagnostics for list-backed properties
+- [x] value-level validation for boolean, integer, and long-backed scalar properties
 - [x] duplicate YAML key diagnostics
 - [x] typo-correction quick fixes for strong unknown-key matches
 - [x] malformed indexed-key quick fixes
@@ -418,9 +434,8 @@ So for the next conversation, do **not** center the work around a deeper JDT LS 
 - [x] Helidon project generation command using archetypes
 
 ### Not implemented yet
-- [ ] value-level validation where hints/metadata allow it
 - [ ] duplicate `.properties` key diagnostics, if product direction wants them
-- [ ] richer code actions for path-shape diagnostics and future inspections
+- [ ] richer code actions for path-shape and value-level diagnostics
 - [ ] endpoint discovery / display
 - [ ] Java-side Helidon references / navigation
 - [ ] value/reference intelligence for config values and placeholders
@@ -434,8 +449,9 @@ So for the next conversation, do **not** center the work around a deeper JDT LS 
 ## Recommended next tasks
 Suggested next priorities for the new conversation:
 1. **Remaining richer inspections** for properties and YAML:
-   - value-level validation where hints/metadata allow it
    - decide whether duplicate `.properties` keys should warn at all
+   - expand value validation only where metadata makes it reliable enough
+   - consider duration/size/enum-like validation only if false positives can be avoided
 2. **Richer code actions** for new inspections where safe:
    - follow-on fixes for scalar/list path-shape issues
    - any safe value-level correction or normalization helpers
@@ -471,15 +487,17 @@ If inspections are tackled, be conservative because missing classpath metadata c
 3. In Extension Development Host, open `/home/jbescos/workspace/demo-helidon` or `/home/jbescos/workspace/helidon-vsc-example`
 4. Test:
    - `application.properties`
-    - malformed indexed properties keys such as `logging.loggers[].name=value`
+   - malformed indexed properties keys such as `logging.loggers[].name=value`
    - scalar nested paths such as `server.port.value=8080`
    - list-backed paths without an index such as `logging.loggers.name=demo`
+   - invalid scalar values such as `metrics.enabled=maybe` or `server.port=eighty`
    - unknown-key typo quick fix such as `server.prt`
    - `src/main/resources/META-INF/microprofile-config.properties` in generated MP projects
    - `application.yaml`
-    - duplicate YAML keys in the same mapping
+   - duplicate YAML keys in the same mapping
    - scalar nested YAML paths such as `server: { port: { value: 8080 } }`
    - list-backed YAML mappings without a list item under `logging.loggers`
+   - invalid YAML scalar values such as `metrics.enabled: maybe`
    - duplicate YAML key quick fix
    - output panel → `Helidon`
    - command palette → `Helidon: Generate Project`

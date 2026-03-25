@@ -24,6 +24,8 @@ interface YamlPathEntry {
 interface YamlDiagnosticEntry extends ConfigKeyDiagnosticTarget {
 	parentPath: string;
 	keySegment: string;
+	value?: string;
+	valueRange?: vscode.Range;
 }
 
 interface IndexedKeyDiagnostic {
@@ -41,6 +43,18 @@ interface IndexedKeyAnalysis {
 interface PathValidationIssue {
 	code: string;
 	message: string;
+}
+
+interface ValueValidationIssue {
+	code: string;
+	message: string;
+}
+
+interface ParsedPropertiesAssignment {
+	key: string;
+	keyRange: vscode.Range;
+	value: string;
+	valueRange?: vscode.Range;
 }
 
 function propertyMarkdown(property: HelidonConfigProperty): vscode.MarkdownString {
@@ -179,6 +193,16 @@ function pathValidationDiagnostic(target: ConfigKeyDiagnosticTarget, issue: Path
 	return diagnostic;
 }
 
+function valueValidationDiagnostic(
+	range: vscode.Range,
+	issue: ValueValidationIssue,
+): vscode.Diagnostic {
+	const diagnostic = new vscode.Diagnostic(range, issue.message, vscode.DiagnosticSeverity.Warning);
+	diagnostic.source = 'helidon-vsc';
+	diagnostic.code = issue.code;
+	return diagnostic;
+}
+
 function levenshteinDistance(left: string, right: string): number {
 	if (left === right) {
 		return 0;
@@ -235,8 +259,8 @@ function preferredKeyForNormalizedKey(normalizedKey: string): string | undefined
 	return keys[0];
 }
 
-function propertyForNormalizedKey(normalizedKey: string): HelidonConfigProperty | undefined {
-	return normalizedHelidonConfigPropertyByKey.get(normalizedKey);
+function propertyForNormalizedKey(key: string): HelidonConfigProperty | undefined {
+	return normalizedHelidonConfigPropertyByKey.get(normalizeConfigKey(key));
 }
 
 function isListProperty(property: HelidonConfigProperty): boolean {
@@ -245,6 +269,10 @@ function isListProperty(property: HelidonConfigProperty): boolean {
 
 function isMapProperty(property: HelidonConfigProperty): boolean {
 	return property.kind === 'MAP';
+}
+
+function isScalarProperty(property: HelidonConfigProperty): boolean {
+	return !isListProperty(property) && !isMapProperty(property);
 }
 
 function suggestHelidonConfigKey(key: string): string | undefined {
@@ -400,6 +428,52 @@ function unknownKeyFromDiagnostic(diagnostic: vscode.Diagnostic): string | undef
 	return match?.[1];
 }
 
+function normalizedScalarValue(value: string): string {
+	const trimmed = value.trim();
+	if (
+		(trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+		(trimmed.startsWith("'") && trimmed.endsWith("'"))
+	) {
+		return trimmed.slice(1, -1).trim();
+	}
+
+	return trimmed;
+}
+
+function valueValidationIssueForProperty(
+	property: HelidonConfigProperty,
+	value: string,
+): ValueValidationIssue | undefined {
+	const normalizedValue = normalizedScalarValue(value);
+	if (normalizedValue.length === 0 || !isScalarProperty(property)) {
+		return undefined;
+	}
+
+	switch (property.type) {
+		case 'java.lang.Boolean':
+			if (/^(true|false)$/iu.test(normalizedValue)) {
+				return undefined;
+			}
+
+			return {
+				code: 'invalid-boolean-value',
+				message: `Helidon configuration value for '${property.key}' must be 'true' or 'false'.`,
+			};
+		case 'java.lang.Integer':
+		case 'java.lang.Long':
+			if (/^[+-]?\d+$/u.test(normalizedValue)) {
+				return undefined;
+			}
+
+			return {
+				code: 'invalid-integer-value',
+				message: `Helidon configuration value for '${property.key}' must be an integer.`,
+			};
+		default:
+			return undefined;
+	}
+}
+
 function toYamlPathSegments(key: string): string[] {
 	return key.split('.');
 }
@@ -429,6 +503,78 @@ function yamlKeyRange(document: vscode.TextDocument, lineIndex: number, key: str
 	const line = document.lineAt(lineIndex).text;
 	const keyStart = line.indexOf(key);
 	return new vscode.Range(lineIndex, keyStart, lineIndex, keyStart + key.length);
+}
+
+function yamlScalarValue(
+	document: vscode.TextDocument,
+	lineIndex: number,
+	keyRange: vscode.Range,
+): { value: string; range: vscode.Range } | undefined {
+	const line = document.lineAt(lineIndex).text;
+	const colonIndex = line.indexOf(':', keyRange.end.character);
+	if (colonIndex === -1) {
+		return undefined;
+	}
+
+	let valueStart = colonIndex + 1;
+	while (valueStart < line.length && /\s/u.test(line[valueStart])) {
+		valueStart += 1;
+	}
+
+	if (valueStart >= line.length) {
+		return undefined;
+	}
+
+	const valueText = line.slice(valueStart).trimEnd();
+	if (
+		valueText.length === 0 ||
+		valueText.startsWith('#') ||
+		valueText === '|' ||
+		valueText === '>' ||
+		valueText.startsWith('{') ||
+		valueText.startsWith('[')
+	) {
+		return undefined;
+	}
+
+	return {
+		value: valueText,
+		range: new vscode.Range(lineIndex, valueStart, lineIndex, valueStart + valueText.length),
+	};
+}
+
+function parsePropertiesAssignment(
+	document: vscode.TextDocument,
+	lineIndex: number,
+): ParsedPropertiesAssignment | undefined {
+	const line = document.lineAt(lineIndex).text;
+	const match = /^\s*([A-Za-z0-9._\-[\]]+)\s*[:=](.*)$/u.exec(line);
+	if (!match) {
+		return undefined;
+	}
+
+	const key = match[1];
+	const keyStart = line.indexOf(key);
+	const keyRange = new vscode.Range(lineIndex, keyStart, lineIndex, keyStart + key.length);
+	const rawValue = match[2];
+	const valueStartOffset = rawValue.search(/\S/u);
+	if (valueStartOffset === -1) {
+		return {
+			key,
+			keyRange,
+			value: '',
+		};
+	}
+
+	const value = rawValue.slice(valueStartOffset).trimEnd();
+	const valueStart = line.length - rawValue.length + valueStartOffset;
+
+	return {
+		key,
+		keyRange,
+		value,
+		valueRange: new vscode.Range(lineIndex, valueStart, lineIndex, valueStart + value.length),
+	};
 }
 
 function parseYamlKey(trimmedLine: string): { key: string; remainder: string } | undefined {
@@ -476,11 +622,15 @@ function yamlKeyEntries(document: vscode.TextDocument): YamlDiagnosticEntry[] {
 
 			const { key, remainder } = parsedListKey;
 			const path = `${itemPath}.${key}`;
+			const range = yamlKeyRange(document, lineIndex, key);
+			const scalarValue = yamlScalarValue(document, lineIndex, range);
 			entries.push({
 				key: path,
-				range: yamlKeyRange(document, lineIndex, key),
+				range,
 				parentPath: itemPath,
 				keySegment: key,
+				value: scalarValue?.value,
+				valueRange: scalarValue?.range,
 			});
 			if (remainder.length === 0 || remainder.startsWith('#')) {
 				stack.push({ indent, path });
@@ -495,11 +645,15 @@ function yamlKeyEntries(document: vscode.TextDocument): YamlDiagnosticEntry[] {
 
 		const { key, remainder } = parsedKey;
 		const path = parentPath ? `${parentPath}.${key}` : key;
+		const range = yamlKeyRange(document, lineIndex, key);
+		const scalarValue = yamlScalarValue(document, lineIndex, range);
 		entries.push({
 			key: path,
-			range: yamlKeyRange(document, lineIndex, key),
+			range,
 			parentPath,
 			keySegment: key,
+			value: scalarValue?.value,
+			valueRange: scalarValue?.range,
 		});
 		if (remainder.length === 0 || remainder.startsWith('#')) {
 			stack.push({ indent, path });
@@ -788,36 +942,48 @@ export function collectHelidonPropertiesDiagnostics(document: vscode.TextDocumen
 			continue;
 		}
 
-		const keyMatch = /^\s*([A-Za-z0-9._\-[\]]+)\s*[:=]/u.exec(line);
-		if (!keyMatch) {
+		const assignment = parsePropertiesAssignment(document, lineIndex);
+		if (!assignment) {
 			continue;
 		}
 
-		const key = keyMatch[1];
+		const { key, keyRange, value, valueRange } = assignment;
 		const analyzedKey = analyzeIndexedConfigKey(key);
 		if (analyzedKey.diagnostic) {
 			if (!shouldValidateHelidonConfigKey(analyzedKey.normalizedKey || key)) {
 				continue;
 			}
 
-			const keyStart = line.indexOf(key);
-			diagnostics.push(indexedKeyDiagnostic(lineIndex, keyStart, analyzedKey.diagnostic));
+			diagnostics.push(
+				indexedKeyDiagnostic(lineIndex, keyRange.start.character, analyzedKey.diagnostic)
+			);
 			continue;
 		}
 
-		if (!shouldValidateHelidonConfigKey(analyzedKey.normalizedKey) || isKnownHelidonConfigKey(analyzedKey.normalizedKey)) {
+		if (!shouldValidateHelidonConfigKey(analyzedKey.normalizedKey)) {
 			continue;
 		}
 
-		const keyStart = line.indexOf(key);
-		const range = new vscode.Range(lineIndex, keyStart, lineIndex, keyStart + key.length);
-		const pathIssue = pathValidationIssueForKey(analyzedKey.normalizedKey);
-		if (pathIssue) {
-			diagnostics.push(pathValidationDiagnostic({ key, range }, pathIssue));
+		if (!isKnownHelidonConfigKey(analyzedKey.normalizedKey)) {
+			const pathIssue = pathValidationIssueForKey(analyzedKey.normalizedKey);
+			if (pathIssue) {
+				diagnostics.push(pathValidationDiagnostic({ key, range: keyRange }, pathIssue));
+				continue;
+			}
+
+			diagnostics.push(unknownHelidonConfigDiagnostic({ key, range: keyRange }));
 			continue;
 		}
 
-		diagnostics.push(unknownHelidonConfigDiagnostic({ key, range }));
+		const property = propertyForNormalizedKey(analyzedKey.normalizedKey);
+		if (!property || !valueRange) {
+			continue;
+		}
+
+		const valueIssue = valueValidationIssueForProperty(property, value);
+		if (valueIssue) {
+			diagnostics.push(valueValidationDiagnostic(valueRange, valueIssue));
+		}
 	}
 
 	return diagnostics;
@@ -828,19 +994,32 @@ export function collectHelidonYamlDiagnostics(document: vscode.TextDocument): vs
 		return [];
 	}
 
-	return [
-		...collectDuplicateYamlKeyDiagnostics(document),
-		...yamlKeyEntries(document)
-			.filter((entry) => shouldValidateHelidonConfigKey(entry.key) && !isKnownHelidonConfigKey(entry.key))
-			.map((entry) => {
-				const pathIssue = pathValidationIssueForKey(entry.key);
-				if (pathIssue) {
-					return pathValidationDiagnostic(entry, pathIssue);
-				}
+	const diagnostics = [...collectDuplicateYamlKeyDiagnostics(document)];
+	for (const entry of yamlKeyEntries(document)) {
+		if (!shouldValidateHelidonConfigKey(entry.key)) {
+			continue;
+		}
 
-				return unknownHelidonConfigDiagnostic(entry);
-			}),
-	];
+		if (!isKnownHelidonConfigKey(entry.key)) {
+			const pathIssue = pathValidationIssueForKey(entry.key);
+			diagnostics.push(
+				pathIssue ? pathValidationDiagnostic(entry, pathIssue) : unknownHelidonConfigDiagnostic(entry)
+			);
+			continue;
+		}
+
+		const property = propertyForNormalizedKey(entry.key);
+		if (!property || !entry.valueRange || entry.value === undefined) {
+			continue;
+		}
+
+		const valueIssue = valueValidationIssueForProperty(property, entry.value);
+		if (valueIssue) {
+			diagnostics.push(valueValidationDiagnostic(entry.valueRange, valueIssue));
+		}
+	}
+
+	return diagnostics;
 }
 
 export function collectHelidonDiagnostics(document: vscode.TextDocument): vscode.Diagnostic[] {

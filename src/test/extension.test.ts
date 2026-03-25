@@ -36,6 +36,27 @@ const TEST_METADATA_JSON = JSON.stringify([
 						kind: 'VALUE',
 						defaultValue: '8080',
 					},
+					{
+						key: 'max-payload-size',
+						type: 'java.lang.Long',
+						description: 'Max payload size',
+						kind: 'VALUE',
+					},
+				],
+			},
+			{
+				type: 'example.MetricsConfig',
+				standalone: true,
+				prefix: 'metrics',
+				inherits: [],
+				options: [
+					{
+						key: 'enabled',
+						type: 'java.lang.Boolean',
+						description: 'Metrics enabled',
+						kind: 'VALUE',
+						defaultValue: 'false',
+					},
 				],
 			},
 			{
@@ -130,6 +151,19 @@ const TEST_PROPERTIES: HelidonConfigProperty[] = [
 		kind: 'VALUE',
 		defaultValue: '8080',
 		description: 'Server port',
+	},
+	{
+		key: 'server.max-payload-size',
+		type: 'java.lang.Long',
+		kind: 'VALUE',
+		description: 'Max payload size',
+	},
+	{
+		key: 'metrics.enabled',
+		type: 'java.lang.Boolean',
+		kind: 'VALUE',
+		defaultValue: 'false',
+		description: 'Metrics enabled',
 	},
 	{
 		key: 'logging.loggers',
@@ -353,6 +387,60 @@ suite('Extension Test Suite', () => {
 		}
 	});
 
+	test('properties diagnostics report invalid boolean and integer values', async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'helidon-vsc-properties-values-'));
+		try {
+			const filePath = path.join(tempRoot, 'microprofile-config.properties');
+			await fs.writeFile(
+				filePath,
+				[
+					'metrics.enabled=maybe',
+					'server.port=eighty',
+					'server.max-payload-size=12kb',
+				].join('\n'),
+				'utf8'
+			);
+			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+
+			seedTestMetadata();
+			const diagnostics = collectHelidonPropertiesDiagnostics(document);
+			assert.strictEqual(diagnostics.length, 3);
+			assert.deepStrictEqual(
+				diagnostics.map((diagnostic) => diagnostic.message),
+				[
+					"Helidon configuration value for 'metrics.enabled' must be 'true' or 'false'.",
+					"Helidon configuration value for 'server.port' must be an integer.",
+					"Helidon configuration value for 'server.max-payload-size' must be an integer.",
+				]
+			);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
+	test('properties diagnostics accept valid boolean and integer values', async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'helidon-vsc-properties-values-valid-'));
+		try {
+			const filePath = path.join(tempRoot, 'microprofile-config.properties');
+			await fs.writeFile(
+				filePath,
+				[
+					'metrics.enabled=true',
+					'server.port=8080',
+					'server.max-payload-size=-1',
+				].join('\n'),
+				'utf8'
+			);
+			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+
+			seedTestMetadata();
+			const diagnostics = collectHelidonPropertiesDiagnostics(document);
+			assert.strictEqual(diagnostics.length, 0);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
+	});
+
 	test('yaml diagnostics warn for unknown keys under known Helidon roots', async () => {
 		const document = await vscode.workspace.openTextDocument({
 			language: 'yaml',
@@ -378,6 +466,48 @@ suite('Extension Test Suite', () => {
 				'  loggers:',
 				'    - name: demo',
 				'      level: INFO',
+			].join('\n'),
+		});
+
+		seedTestMetadata();
+		const diagnostics = collectHelidonYamlDiagnostics(document);
+		assert.strictEqual(diagnostics.length, 0);
+	});
+
+	test('yaml diagnostics report invalid boolean and integer values', async () => {
+		const document = await vscode.workspace.openTextDocument({
+			language: 'yaml',
+			content: [
+				'metrics:',
+				'  enabled: maybe',
+				'server:',
+				'  port: eighty',
+				'  max-payload-size: 12kb',
+			].join('\n'),
+		});
+
+		seedTestMetadata();
+		const diagnostics = collectHelidonYamlDiagnostics(document);
+		assert.strictEqual(diagnostics.length, 3);
+		assert.deepStrictEqual(
+			diagnostics.map((diagnostic) => diagnostic.message),
+			[
+				"Helidon configuration value for 'metrics.enabled' must be 'true' or 'false'.",
+				"Helidon configuration value for 'server.port' must be an integer.",
+				"Helidon configuration value for 'server.max-payload-size' must be an integer.",
+			]
+		);
+	});
+
+	test('yaml diagnostics accept quoted valid boolean and integer values', async () => {
+		const document = await vscode.workspace.openTextDocument({
+			language: 'yaml',
+			content: [
+				'metrics:',
+				'  enabled: "false"',
+				'server:',
+				'  port: "8080"',
+				'  max-payload-size: \'-1\'',
 			].join('\n'),
 		});
 
