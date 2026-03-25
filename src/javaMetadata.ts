@@ -12,6 +12,8 @@ import {
 const HELIDON_METADATA_ENTRY_PATH = 'META-INF/helidon/config-metadata.json';
 const JAVA_EXECUTE_WORKSPACE_COMMAND = 'java.execute.workspaceCommand';
 const JAVA_GET_CLASSPATHS_COMMAND = 'java.project.getClasspaths';
+const HELIDON_CLASSPATH_PROBE_FILE_PATTERN =
+	/^(?:application\.properties|application(?:-[^/]+)?\.yaml|microprofile-config(?:-[^/]+)?\.properties)$/u;
 
 interface JavaClasspaths {
 	classpaths: string[];
@@ -154,12 +156,6 @@ async function findClasspathProbeUris(folder: vscode.WorkspaceFolder): Promise<v
 	const probeUris: vscode.Uri[] = [];
 	const queue: string[] = [folder.uri.fsPath];
 	const skippedDirectories = new Set(['.git', '.gradle', '.idea', '.mvn', '.settings', 'node_modules', 'target']);
-	const wantedFiles = new Set([
-		'microprofile-config.properties',
-		'application.properties',
-		'application.yaml',
-		'application.yml',
-	]);
 
 	while (queue.length > 0 && probeUris.length < 4) {
 		const currentPath = queue.shift();
@@ -184,7 +180,7 @@ async function findClasspathProbeUris(folder: vscode.WorkspaceFolder): Promise<v
 			}
 
 			if (entry.isFile()) {
-				if (entry.name.endsWith('.java') || wantedFiles.has(entry.name)) {
+				if (entry.name.endsWith('.java') || HELIDON_CLASSPATH_PROBE_FILE_PATTERN.test(entry.name)) {
 					probeUris.push(vscode.Uri.file(entryPath));
 					if (probeUris.length >= 4) {
 						break;

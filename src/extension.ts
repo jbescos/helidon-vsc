@@ -39,6 +39,14 @@ const INITIAL_METADATA_MAX_ATTEMPTS = 15;
 export function activate(context: vscode.ExtensionContext) {
 	const output = vscode.window.createOutputChannel('Helidon');
 	output.appendLine('Helidon VS Code extension is active.');
+	const helidonPropertiesDocumentSelectors: vscode.DocumentSelector = [
+		{ scheme: 'file', pattern: '**/application.properties' },
+		{ scheme: 'file', pattern: '**/microprofile-config.properties' },
+		{ scheme: 'file', pattern: '**/microprofile-config-*.properties' },
+		{ scheme: 'untitled', pattern: '**/application.properties' },
+		{ scheme: 'untitled', pattern: '**/microprofile-config.properties' },
+		{ scheme: 'untitled', pattern: '**/microprofile-config-*.properties' },
+	];
 	const runStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 	runStatusBarItem.name = 'Helidon Run Project';
 	runStatusBarItem.text = '$(run) Helidon';
@@ -68,12 +76,7 @@ export function activate(context: vscode.ExtensionContext) {
 	let metadataRetryTimer: ReturnType<typeof setTimeout> | undefined;
 
 	const completionProvider = vscode.languages.registerCompletionItemProvider(
-		[
-			{ scheme: 'file', pattern: '**/application*.properties' },
-			{ scheme: 'file', pattern: '**/microprofile-config.properties' },
-			{ scheme: 'untitled', pattern: '**/application*.properties' },
-			{ scheme: 'untitled', pattern: '**/microprofile-config.properties' },
-		],
+		helidonPropertiesDocumentSelectors,
 		new HelidonPropertiesCompletionProvider(),
 		'.',
 		'$'
@@ -94,10 +97,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const hoverProvider = vscode.languages.registerHoverProvider(
 		[
-			{ scheme: 'file', pattern: '**/application*.properties' },
-			{ scheme: 'file', pattern: '**/microprofile-config.properties' },
-			{ scheme: 'untitled', pattern: '**/application*.properties' },
-			{ scheme: 'untitled', pattern: '**/microprofile-config.properties' },
+			...helidonPropertiesDocumentSelectors,
 			{ language: 'yaml', scheme: 'file' },
 			{ language: 'yaml', scheme: 'untitled' },
 		],
@@ -111,10 +111,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const placeholderDefinitionProvider = vscode.languages.registerDefinitionProvider(
 		[
-			{ scheme: 'file', pattern: '**/application*.properties' },
-			{ scheme: 'file', pattern: '**/microprofile-config.properties' },
-			{ scheme: 'untitled', pattern: '**/application*.properties' },
-			{ scheme: 'untitled', pattern: '**/microprofile-config.properties' },
+			...helidonPropertiesDocumentSelectors,
 			{ language: 'yaml', scheme: 'file' },
 			{ language: 'yaml', scheme: 'untitled' },
 		],
@@ -138,10 +135,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const codeActionProvider = vscode.languages.registerCodeActionsProvider(
 		[
-			{ scheme: 'file', pattern: '**/application*.properties' },
-			{ scheme: 'file', pattern: '**/microprofile-config.properties' },
-			{ scheme: 'untitled', pattern: '**/application*.properties' },
-			{ scheme: 'untitled', pattern: '**/microprofile-config.properties' },
+			...helidonPropertiesDocumentSelectors,
 			{ language: 'yaml', scheme: 'file' },
 			{ language: 'yaml', scheme: 'untitled' },
 			{ language: 'java', scheme: 'file' },

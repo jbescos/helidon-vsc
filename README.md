@@ -1,147 +1,320 @@
 # Helidon VS Code Extension
 
-VS Code extension for Helidon that will grow into framework tooling comparable to Spring, Quarkus, and Micronaut extensions.
+`helidon-vsc` adds Helidon-aware editing, navigation, endpoint discovery, and project lifecycle commands to VS Code.
+
+## Current Scope
+
+This extension currently covers:
+
+- Helidon configuration support in `.properties` and YAML files
+- Java support for Helidon `Config.get("...")` keys
+- Helidon endpoint discovery for JAX-RS and Helidon Routing code
+- Project generation, run, debug, and stop actions
+
+## Requirements
+
+- Visual Studio Code `1.110.0` or newer
+- `Language Support for Java(TM) by Red Hat` (`redhat.java`)
+- `Extension Pack for Java` is recommended if you want run/debug support
+- Open the Helidon project as a VS Code workspace folder so the Java extension can resolve classpaths
+- Optional: `helidon` on `PATH` for the Helidon CLI wizard
+- Optional: Maven or Gradle installed for project generation and run/debug
 
 ## Features
 
-Current feature set:
+### 1. Helidon `.properties` support
 
-- Helidon configuration completion in `application.properties`, `application-*.properties`, and `microprofile-config.properties`
-- Helidon configuration completion in `application.yaml`, `application.yml`, and `application-*.ya?ml`
-- Hover documentation for known Helidon properties in Helidon properties/YAML config files
-- Conservative diagnostics for unknown Helidon configuration keys in Helidon properties/YAML config files
-- Indexed-key syntax diagnostics in `application.properties` / `microprofile-config.properties`
-- Nested-path diagnostics for scalar Helidon properties
-- Missing-list-index diagnostics for list-backed Helidon properties
-- Value-level diagnostics for boolean and integer-like Helidon properties
-- Placeholder key diagnostics, completion, hover, and go-to-definition for `${...}` references in Helidon config values
-- Duplicate Helidon `.properties` key diagnostics in supported properties files
-- Duplicate YAML key diagnostics in `application.yaml` / `application.yml`
-- Quick fixes for unknown-key typos when a strong Helidon metadata match exists
-- Quick fixes for malformed indexed properties keys
-- Quick fixes for path-shape issues when the Helidon key can be safely rewritten
-- Default-backed quick fixes for invalid boolean/integer config values when metadata provides a reliable replacement
-- Quick fixes to remove duplicate YAML keys
-- Java completion, hover, diagnostics, go-to-definition, and quick fixes for Helidon `Config.get("...")` keys
-- Explorer view for Helidon endpoints discovered from JAX-RS resources and Helidon routing/service patterns
-- Java code lenses for discovered endpoints
-- Path-parameter go-to-definition for common Helidon request path accessor usages
-- Click-through navigation from endpoint entries back to Java source methods
-- Helidon project generation via the Helidon CLI wizard when `helidon` is installed
-- Built-in Helidon Maven archetype project generation fallback
-- `Helidon: Run Project`, `Helidon: Debug Project`, and `Helidon: Stop Project` for a basic Helidon run/debug lifecycle
-- always-visible status bar buttons for Run and Debug, plus a Stop button while a Helidon session/task is active; toolbar buttons for Create Project, Run, Debug, and Stop in the `Helidon` view; and Explorer folder context-menu actions for Run, Debug, and Stop
-- automatic endpoint view refresh on Java edits and workspace file changes
+Works in:
 
-When editing an `application.properties` or `microprofile-config.properties` file, typing prefixes like `server.` will offer Helidon configuration keys such as:
+- exact `application.properties`
+- exact `microprofile-config.properties`
+- `microprofile-config-<profile>.properties`, for example `microprofile-config-dev.properties`
+- untitled editors with matching names such as `untitled:/application.properties`, `untitled:/microprofile-config.properties`, and `untitled:/microprofile-config-dev.properties`
 
-- `server.port`
-- `server.host`
-- `server.features.observe.enabled`
-- `logging.level`
-- `security.providers.0.oidc.client-id`
+Not recognized:
 
-When editing `application.yaml`, the extension offers YAML key suggestions using the same metadata. For example:
+- `application-dev.properties`
+- `applicationdev.properties`
+- `application.properties.bak`
+
+What you get:
+
+- completion for Helidon config keys
+- hover documentation from Helidon metadata
+- diagnostics for unknown keys, malformed indexes, invalid nesting, invalid boolean/integer/long values, placeholder typos, and duplicate Helidon keys
+- quick fixes for typos, missing list indexes, malformed index syntax, safe path rewrites, and default-backed value replacements
+- go-to-definition from `${...}` placeholders to matching config keys in the workspace
+
+Example:
+
+```properties
+# typing `server.` offers Helidon keys such as `server.port`
+server.
+
+# unknown key typo
+server.prt=8080
+
+# malformed and missing list indexes
+logging.loggers[].name=demo
+logging.loggers.name=demo
+
+# invalid nesting under a scalar property
+server.port.value=8080
+
+# invalid value with a metadata-backed default
+metrics.enabled=maybe
+
+# placeholder validation and navigation
+server.port=${server.prt}
+
+# custom roots are left alone
+custom.value=test
+
+# duplicate Helidon key detection
+server.port=8080
+server.port=8081
+```
+
+Expected behavior:
+
+- `server.` suggests keys such as `server.port`
+- `server.prt` gets a warning and offers `Change to 'server.port'`
+- `logging.loggers[].name` offers `Replace with '[0]'`
+- `logging.loggers.name` offers `Change to 'logging.loggers[0].name'`
+- `server.port.value` warns that `server.port` does not support nested keys
+- `metrics.enabled=maybe` offers `Replace with default 'false'`
+- `${server.prt}` is validated like any other Helidon key
+- `custom.value` is ignored because `custom` is not a known Helidon config root
+- duplicate Helidon keys are flagged in supported properties files
+
+### 2. Helidon YAML support
+
+Works in:
+
+- exact `application.yaml`
+- `application-<profile>.yaml`, for example `application-prod.yaml`
+- untitled editors with matching names such as `untitled:/application.yaml`
+
+Not recognized:
+
+- `microprofile-config.yaml`
+- `microprofile-config.yml`
+- `application.yml`
+- `application-dev.yml`
+- `values.yaml`
+- `applicationdev.yaml`
+
+What you get:
+
+- YAML key completion using Helidon metadata
+- hover documentation on resolved keys
+- diagnostics for unknown keys, invalid nesting, missing list indexes, invalid scalar values, placeholder typos, and duplicate YAML keys
+- quick fixes for key typos, placeholder typos, and duplicate key removal
+
+Example:
+
+```yaml
+# typing under `server:` offers keys such as `port`
+server:
+  prt: 8080
+  port: ${server.prt}
+
+logging:
+  loggers:
+    name: demo
+
+metrics:
+  enabled: maybe
+
+custom:
+  value: test
+```
+
+Another duplicate-key example:
 
 ```yaml
 server:
-  features:
-    observe:
-      
+  port: 8080
+  port: 8081
 ```
 
-and hover works on resolved YAML keys such as `port`, `host`, `enabled`, or `path` when they map to known Helidon configuration entries.
+Expected behavior:
 
-Completion items include:
+- under `server:`, the extension suggests keys such as `port`
+- `prt` gets a warning and offers `Change to 'port'`
+- `${server.prt}` keeps the full key in the quick fix and offers `Change to 'server.port'`
+- `logging.loggers` without a list item/index is flagged
+- `metrics.enabled: maybe` is flagged as an invalid boolean value
+- `custom.value` is ignored because `custom` is not a known Helidon config root
+- duplicate YAML keys get a warning and offer `Remove duplicate YAML key`
 
-- property name
-- property type
-- default value when known
-- short documentation and example value
+### 3. Java support for `Config.get("...")`
 
-Hover support includes:
+What you get:
 
-- property description
-- property type
-- default value when known
-- example value
+- completion inside string literals passed to `Config.get(...)`
+- hover documentation for known Helidon keys
+- diagnostics and typo quick fixes for unknown Helidon keys under known Helidon roots
+- go-to-definition from `Config.get("...")` to matching keys in supported config files
 
-Diagnostics currently cover:
+Example:
 
-- unknown keys under known Helidon config roots such as `server`, `logging`, or `security`, which keeps custom application properties out of the warning stream
-- malformed indexed properties keys such as missing `]`, empty `[]`, or non-integer indexes
-- nested keys under scalar Helidon properties such as `server.port.value`
-- missing indexes before nested list-backed keys such as `logging.loggers.name`
-- invalid values for known boolean, integer, and long-backed properties such as `metrics.enabled=maybe` or `server.port=eighty`
-- invalid placeholder keys under known Helidon config roots such as `${server.prt}`
-- duplicate Helidon keys within the same `.properties` file
-- duplicate YAML keys within the same mapping
+`application.yaml`
 
-Quick fixes currently cover:
+```yaml
+server:
+  port: 8080
+```
 
-- typo correction for unknown keys when the metadata match is strong enough
-- malformed indexed properties keys by inserting `]` or replacing invalid brackets with `[0]`
-- safe rewrites for scalar/list path-shape issues such as `server.port.value` or `logging.loggers.name`
-- metadata-default replacements for invalid boolean/integer values when a reliable default is known
-- duplicate YAML key removal
+`Demo.java`
 
-Duplicate `.properties` key diagnostics are intentionally limited to Helidon roots in supported Helidon properties files. There is no duplicate-key quick fix for `.properties` files yet.
+```java
+import io.helidon.config.Config;
 
-## Endpoint discovery
+class Demo {
+    void load(Config config) {
+        int port = config.get("server.port").asInt();
+        int broken = config.get("server.prt").asInt();
+    }
+}
+```
 
-The extension now contributes a **Helidon** view in the Explorer.
+Expected behavior:
 
-Current endpoint support:
+- typing `config.get("server.")` offers keys such as `server.port`
+- hovering `server.port` shows Helidon docs, type, and default value when available
+- go-to-definition on `server.port` opens the matching YAML or properties entry
+- `server.prt` gets a warning and offers `Change to 'server.port'`
 
-- scans workspace Java files for JAX-RS resources using class-level and method-level `@Path`
-- scans Helidon routing builder and service-style route declarations such as `rules.get(...)`, `routing.post(...)`, and `routing.register("/base", new Service())`
-- detects HTTP methods from `@GET`, `@POST`, `@PUT`, `@DELETE`, `@PATCH`, `@HEAD`, `@OPTIONS`, and Helidon routing methods including `TRACE`
-- groups endpoints by resource/service class
-- opens the corresponding Java method when you click an endpoint entry
-- adds Java code lenses such as `GET /greet/{name}` above discovered handlers
-- lets common path-parameter usages jump back to candidate route declarations in the same file
+### 4. Endpoint discovery in the Explorer
 
-Current limitations:
+The extension contributes a `Helidon` view in the Explorer and groups discovered endpoints by Java class.
 
-- endpoint discovery uses the bundled `java-parser` CST library rather than a semantic Java model
-- endpoint discovery no longer relies on hand-written regex parsing, but it is still not backed by a full Java symbol/AST API from `redhat.java`
-- service registration resolution is conservative and currently strongest when services are registered via `new ServiceType(...)`
-- endpoint inlay hints are represented as VS Code code lenses rather than IntelliJ-style inline hints
+Supported endpoint sources:
 
-## Metadata source
+- JAX-RS resources using `@Path` and HTTP method annotations
+- Helidon Routing and service-style route registrations such as `rules.get(...)`, `routing.post(...)`, and `routing.register("/base", new Service())`
 
-The extension reads Helidon metadata from the Java classpath using the `Language Support for Java(TM) by Red Hat` extension API.
-It resolves the runtime classpath for the current workspace and reads `META-INF/helidon/config-metadata.json` from directories and dependency JARs.
+Example: JAX-RS resource
 
-There is no bundled fallback metadata catalog anymore. If the Java extension is missing, or the Java workspace has not finished loading, Helidon completion and hover will stay unavailable and the extension will show a warning.
+```java
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
 
-## Project generation
+@Path("/greet")
+public class GreetResource {
+    @GET
+    public Message getDefaultMessage() {
+        return null;
+    }
 
-The extension now includes **Helidon: Generate Project**.
+    @Path("/{name}")
+    @GET
+    public Message getMessage(String name) {
+        return null;
+    }
 
-Current behavior:
+    @Path("/greeting")
+    @PUT
+    public Response updateGreeting(Message message) {
+        return null;
+    }
+}
+```
 
-- the command always shows both project-generation paths:
-  - **Helidon CLI Wizard** for richer archetype and feature selection using `helidon init`
-  - **Maven Archetype Generator** as a built-in fallback
-- if `helidon` is not available on `PATH`, the picker keeps the Helidon CLI option visible but disabled and explains that the CLI was not found on `PATH`
+The `Helidon` view shows entries like:
 
-Current CLI wizard behavior:
+```text
+GreetResource
+  GET /greet
+  GET /greet/{name}
+  PUT /greet/greeting
+```
 
-- prompts for the target folder where the wizard should run
-- opens an integrated terminal in that folder
-- runs `helidon init`
-- lets the Helidon CLI drive richer selection such as QuickStart / Database / Custom archetypes and the associated feature prompts
-- uses an existing external `helidon` binary on `PATH`; the extension does not bundle or install the CLI itself
+Example: Helidon Routing service
 
-Current built-in Maven fallback behavior:
+```java
+public class GreetService {
+    void update(Routing.Rules rules) {
+        rules.get("/", this::getDefaultMessageHandler)
+             .get("/{name}", this::getMessageHandler)
+             .put("/greeting", this::updateGreetingHandler);
+    }
 
-- prompts for target folder
-- prompts for `groupId`, `artifactId`, package, legacy archetype, and version
-- runs Maven archetype generation with Helidon archetypes from Maven Central
-- opens the generated project in VS Code
+    void getDefaultMessageHandler(ServerRequest req, ServerResponse res) {
+    }
 
-Supported built-in fallback archetype choices right now:
+    void getMessageHandler(ServerRequest req, ServerResponse res) {
+    }
+
+    void updateGreetingHandler(ServerRequest req, ServerResponse res) {
+    }
+}
+```
+
+Expected behavior:
+
+- discovered endpoints appear in the `Helidon` Explorer view
+- clicking an endpoint opens the matching Java source location
+- Java code lenses such as `GET /{name}` appear above discovered handlers
+- the view refreshes automatically on Java edits and workspace file changes
+
+### 5. Path-parameter go-to-definition
+
+Common path-parameter lookups in Java can jump back to route definitions in the same file.
+
+Example:
+
+```java
+rules.get("/{name}", this::getMessageHandler);
+
+void getMessageHandler(ServerRequest req, ServerResponse res) {
+    String name = req.path().param("name");
+}
+```
+
+Expected behavior:
+
+- using Go to Definition on `"name"` in `param("name")` can navigate back to the route that contains `{name}`
+
+### 6. Project generation
+
+Command:
+
+- `Helidon: Generate Project`
+
+What it supports:
+
+- `Helidon CLI Wizard` when `helidon` is available on `PATH`
+- `Maven Archetype Generator` as a built-in fallback
+- the CLI option stays visible but disabled when the CLI is missing
+- the `Helidon` Explorer view toolbar exposes the same command as a Create Project button
+
+Example: Helidon CLI wizard
+
+1. Run `Helidon: Generate Project`
+2. Choose `Helidon CLI Wizard`
+3. Select a target directory
+4. The extension opens an integrated terminal and runs:
+
+```bash
+helidon init
+```
+
+Example: Maven fallback
+
+```text
+groupId: com.example
+artifactId: demo-helidon
+package: com.example.demohelidon
+archetype: helidon-quickstart-se
+version: 4.4.0
+```
+
+The extension runs Maven archetype generation and opens the generated project folder in VS Code.
+
+Built-in fallback archetypes:
 
 - `helidon-quickstart-se`
 - `helidon-quickstart-mp`
@@ -150,67 +323,115 @@ Supported built-in fallback archetype choices right now:
 - `helidon-database-se`
 - `helidon-database-mp`
 
-The extension also includes **Helidon: Run Project**, **Helidon: Debug Project**, and **Helidon: Stop Project**.
+### 7. Run, debug, and stop commands
 
-Current behavior:
+Commands:
+
+- `Helidon: Run Project`
+- `Helidon: Debug Project`
+- `Helidon: Stop Project`
+
+What it does:
 
 - detects Maven or Gradle projects in the selected workspace folder
-- resolves a Java main class for launch and falls back to `io.helidon.Main` for likely Helidon MicroProfile projects
-- `Helidon: Run Project` and `Helidon: Debug Project` automatically create or update `.vscode/tasks.json` with `helidon: build` and `helidon: run`
-- `Helidon: Run Project` and `Helidon: Debug Project` automatically create or update `.vscode/launch.json` with a Java launch configuration that uses the integrated terminal
-- `Helidon: Run Project` starts the Java launcher in no-debug mode
-- `Helidon: Debug Project` starts the Java debugger
-- `Helidon: Stop Project` stops matching Helidon Java launch sessions and falls back to terminating Helidon tasks when needed
-- status bar shortcuts expose always-visible Run and Debug actions when a workspace folder is open, and a Stop action while a Helidon session/task is active
-- the `Helidon` view title exposes button shortcuts for Create Project, Run, Debug, and Stop
-- Explorer folder context menus expose Run, Debug, and Stop for open workspace folders
-- the `Helidon` view refreshes automatically on Java edits and workspace file changes
-- reuses existing `.vscode` files instead of replacing unrelated entries
+- resolves a Java main class and falls back to `io.helidon.Main` for likely Helidon MicroProfile projects
+- creates or updates `.vscode/tasks.json` with `helidon: build` and `helidon: run`
+- creates or updates `.vscode/launch.json` with `Launch Helidon Application`
+- exposes Run and Debug in the status bar when a workspace is open, and Stop while a Helidon session or task is active
+- adds Run, Debug, and Stop to Explorer folder context menus and the `Helidon` view toolbar
 
-## Requirements
+Example generated files for a Maven project:
 
-Runtime requirements:
+`.vscode/tasks.json`
 
-- Visual Studio Code 1.110 or newer
-- `Language Support for Java(TM) by Red Hat` (`redhat.java`)
-- Open the Helidon project as a Java workspace in VS Code and let the Java extension finish project/classpath initialization
+```json
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "helidon: build",
+      "type": "shell",
+      "command": "mvn",
+      "args": ["package"]
+    },
+    {
+      "label": "helidon: run",
+      "type": "shell",
+      "command": "mvn",
+      "args": [
+        "compile",
+        "org.codehaus.mojo:exec-maven-plugin:3.6.2:java",
+        "-Dexec.mainClass=com.example.Main"
+      ]
+    }
+  ]
+}
+```
 
-Notes:
+`.vscode/launch.json`
 
-- Installing `Extension Pack for Java` is also fine; it includes `redhat.java`
-- Installing `Extension Pack for Java` is recommended for the run/debug commands because it also includes Java Debugger support
-- This extension declares `redhat.java` as an extension dependency because Helidon metadata loading relies on its Java project/classpath API
-- No separate `java-parser` installation is required by users; `java-parser` is bundled as an internal dependency used for endpoint and path-parameter parsing
-- The richer Helidon project-generation wizard requires the `helidon` CLI to be installed separately and available on `PATH`
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "Launch Helidon Application",
+      "request": "launch",
+      "mainClass": "com.example.Main",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "preLaunchTask": "helidon: build"
+    }
+  ]
+}
+```
+
+Gradle projects use `./gradlew build` and `./gradlew run` instead.
+
+Example stop flow:
+
+1. Start `Helidon: Run Project` or `Helidon: Debug Project`
+2. Use `Helidon: Stop Project` from the Command Palette, Explorer context menu, or status bar
+3. The extension stops matching Helidon Java debug sessions first and falls back to terminating Helidon tasks when needed
+
+## Metadata Source
+
+Helidon config keys and documentation are loaded from `META-INF/helidon/config-metadata.json` on the Java runtime classpath using the Red Hat Java extension API.
+
+Example:
+
+- if the workspace resolves Helidon dependencies that expose `server.port` and `metrics.enabled`, those keys become available for completion, hover, diagnostics, and quick fixes after Java classpath initialization finishes
+
+There is no bundled fallback metadata catalog in this repo. If the Java workspace is not ready, Helidon config assistance can stay unavailable until classpath resolution completes.
 
 ## Extension Settings
 
-No custom settings yet.
+There are no custom extension settings yet.
 
-## Known Issues
+## Development
 
-- Completion and hover support are currently scoped to Helidon-style `application*.properties`, `microprofile-config.properties`, `application*.yaml`, and `application*.yml` files.
-- Completion, hover, and diagnostics depend on Java classpath metadata being available from `redhat.java`.
-- If the Java workspace is still loading, Helidon metadata may appear a moment later after classpath resolution finishes.
-- Duplicate `.properties` key diagnostics are intentionally conservative and scoped to Helidon roots in supported Helidon properties files.
-- Value validation is intentionally conservative and currently only covers scalar boolean, integer, and long-backed Helidon properties.
-- The CLI-based project-generation wizard currently runs in an integrated terminal and does not yet auto-open the generated project folder after the wizard completes.
-- Post-generation “add Helidon feature/dependency to an existing project” support is not implemented yet.
-- Run/debug main-class resolution is intentionally conservative; if no Java main class is found and the project does not look like a Helidon MicroProfile project, the run/debug commands will not start.
-- There is no quick fix yet to remove duplicate Helidon `.properties` keys.
-- Quick fixes are intentionally conservative and still do not attempt structural YAML rewrites for nested/list path issues.
-- Java `Config.get(...)` detection and related quick fixes are source-pattern-based and intentionally conservative rather than full Java semantic analysis.
+Install dependencies and build:
 
-## Release Notes
+```bash
+npm install
+npm run compile
+```
 
-### 0.0.1
+Run the test suite:
 
-- Initial project scaffold
-- Added Helidon `application.properties` completion MVP
+```bash
+npm test
+```
 
----
+Open the repo in VS Code and press `F5` to start an Extension Development Host.
 
-## For more information
+## Known Limitations
 
-* [VS Code Extension API](https://code.visualstudio.com/api)
-* [VS Code Language Features](https://code.visualstudio.com/api/language-extensions/programmatic-language-features)
+- config filename matching is exact and conservative: supported names are exact `application.properties`, exact `microprofile-config.properties`, `microprofile-config-<profile>.properties`, exact `application.yaml`, and `application-<profile>.yaml`; files such as `application-dev.properties`, `application.yml`, `microprofile-config.yaml`, and `values.yaml` are not recognized
+- Java config support is intentionally conservative and currently focuses on `Config.get("...")` string literals
+- endpoint discovery uses `java-parser` and source parsing, not a full semantic Java symbol model
+- duplicate `.properties` keys are diagnosed, but there is no quick fix to remove them yet
+- YAML quick fixes are conservative and do not attempt structural rewrites for nested/list path issues
+- the Helidon CLI wizard currently runs in an integrated terminal and does not auto-open the generated project folder after `helidon init`
+- run/debug main-class resolution is conservative; if no main class can be resolved and the project does not look like a Helidon MicroProfile project, the command will not start

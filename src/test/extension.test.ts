@@ -440,12 +440,20 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(isHelidonPropertiesDocument(document), true);
 	});
 
-	test('application-dev.properties is recognized as a Helidon properties document', () => {
+	test('profile-specific microprofile-config properties are recognized as Helidon properties documents', () => {
+		const document = {
+			fileName: '/tmp/microprofile-config-dev.properties',
+			languageId: 'plaintext',
+		} as vscode.TextDocument;
+		assert.strictEqual(isHelidonPropertiesDocument(document), true);
+	});
+
+	test('application-dev.properties is not recognized as a Helidon properties document', () => {
 		const document = {
 			fileName: '/tmp/application-dev.properties',
 			languageId: 'plaintext',
 		} as vscode.TextDocument;
-		assert.strictEqual(isHelidonPropertiesDocument(document), true);
+		assert.strictEqual(isHelidonPropertiesDocument(document), false);
 	});
 
 	test('non application.properties file names are ignored', async () => {
@@ -460,6 +468,11 @@ suite('Extension Test Suite', () => {
 	test('application.yaml is recognized as a Helidon YAML document', async () => {
 		const document = await vscode.workspace.openTextDocument(vscode.Uri.parse('untitled:/application.yaml'));
 		assert.strictEqual(isHelidonYamlDocument(document), true);
+	});
+
+	test('application.yml is not recognized as a Helidon YAML document', async () => {
+		const document = await vscode.workspace.openTextDocument(vscode.Uri.parse('untitled:/application.yml'));
+		assert.strictEqual(isHelidonYamlDocument(document), false);
 	});
 
 	test('non application YAML file names are ignored', async () => {

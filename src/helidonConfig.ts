@@ -16,8 +16,9 @@ let normalizedHelidonConfigKeyMap = new Map<string, string[]>();
 let normalizedHelidonConfigPropertyByKey = new Map<string, HelidonConfigProperty>();
 let helidonConfigSchemaRoot: ConfigSchemaNode = { children: new Map() };
 const YAML_KEY_SEGMENT_PATTERN = /[A-Za-z0-9_-]+/;
-const HELIDON_APPLICATION_PROPERTIES_PATTERN = /(?:^|\/)(application(?:-[^/]+)?|microprofile-config)\.properties$/iu;
-const HELIDON_APPLICATION_YAML_PATTERN = /(?:^|\/)application(?:-[^/]+)?\.ya?ml$/iu;
+const HELIDON_APPLICATION_PROPERTIES_PATTERN =
+	/(?:^|\/)(?:application|microprofile-config(?:-[^/]+)?)\.properties$/iu;
+const HELIDON_APPLICATION_YAML_PATTERN = /(?:^|\/)application(?:-[^/]+)?\.yaml$/iu;
 
 interface ConfigKeyDiagnosticTarget {
 	key: string;

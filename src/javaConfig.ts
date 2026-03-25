@@ -12,7 +12,8 @@ import {
 import type { HelidonConfigProperty } from './metadata';
 
 const JAVA_CONFIG_KEY_PATTERN = /\.get\s*\(\s*"([^"]*)"/gu;
-const CONFIG_FILE_GLOB = '**/{application*.properties,microprofile-config.properties,application*.yaml,application*.yml}';
+const CONFIG_FILE_GLOB =
+	'**/{application.properties,microprofile-config.properties,microprofile-config-*.properties,application.yaml,application-*.yaml}';
 const CONFIG_FILE_EXCLUDE_GLOB = '**/{.git,.gradle,.idea,node_modules,target}/**';
 
 export interface JavaConfigReference {
