@@ -51,6 +51,7 @@ import { parseHelidonConfigMetadata, type HelidonConfigProperty } from '../metad
 import {
 	executeJavaWorkspaceCommand,
 	loadHelidonConfigMetadataFromJavaClasspaths,
+	reloadCurrentExtensionJavaBundles,
 	type JavaExtensionApi,
 } from '../javaMetadata';
 
@@ -446,8 +447,8 @@ suite('Extension Test Suite', () => {
 			assert.strictEqual(locations[0].range.start.line, 10);
 		});
 
-		test('endpoint discovery prefers semantic Java results when available', async () => {
-			const workspaceUri = vscode.Uri.file('/tmp/helidon-semantic-workspace');
+	test('endpoint discovery prefers semantic Java results when available', async () => {
+		const workspaceUri = vscode.Uri.file('/tmp/helidon-semantic-workspace');
 		const endpointUri = vscode.Uri.file('/tmp/helidon-semantic-workspace/src/main/java/GreetResource.java');
 		let fallbackInvoked = false;
 
@@ -494,6 +495,59 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(result.groups[0].className, 'GreetResource');
 		assert.strictEqual(result.groups[0].endpoints[0].path, '/greet/{name}');
 		assert.strictEqual(result.message, 'Helidon endpoint discovery is using Java semantic support (1 endpoint(s)).');
+	});
+
+	test('endpoint discovery reloads contributed Java bundles when the Helidon delegate handler is missing', async () => {
+		const workspaceUri = vscode.Uri.file('/tmp/helidon-semantic-reload-workspace');
+		const endpointUri = vscode.Uri.file('/tmp/helidon-semantic-reload-workspace/src/main/java/GreetService.java');
+		let commandInvocations = 0;
+		let reloadInvocations = 0;
+
+		const result = await discoverHelidonEndpointGroups({
+			workspaceFolders: [{ uri: workspaceUri }],
+			commandExecutor: async () => {
+				commandInvocations += 1;
+				if (commandInvocations === 1) {
+					throw new Error(`No delegateCommandHandler for ${HELIDON_ENDPOINT_DISCOVERY_COMMAND}`);
+				}
+
+				return {
+					supported: true,
+					groups: [
+						{
+							className: 'GreetService',
+							relativePath: 'src/main/java/GreetService.java',
+							uri: endpointUri.toString(),
+							line: 5,
+							endpoints: [
+								{
+									className: 'GreetService',
+									methodName: 'getDefaultMessageHandler',
+									httpMethod: 'GET',
+									path: '/greet',
+									relativePath: 'src/main/java/GreetService.java',
+									uri: endpointUri.toString(),
+									line: 7,
+								},
+							],
+						},
+					],
+				};
+			},
+			bundleReloader: async () => {
+				reloadInvocations += 1;
+				return true;
+			},
+			fallbackProvider: async () => {
+				assert.fail('The source-parser fallback should not run after a successful bundle reload.');
+			},
+		});
+
+		assert.strictEqual(commandInvocations, 2);
+		assert.strictEqual(reloadInvocations, 1);
+		assert.strictEqual(result.source, 'semantic');
+		assert.strictEqual(result.groups.length, 1);
+		assert.strictEqual(result.groups[0].endpoints[0].path, '/greet');
 	});
 
 	test('endpoint discovery falls back when semantic Java support reports unsupported', async () => {
@@ -620,6 +674,57 @@ suite('Extension Test Suite', () => {
 				args: ['io.helidon.vscode.demo', 'payload'],
 			},
 		]);
+	});
+
+	test('bundle reload resolves the current extension bundle paths from package.json', async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'helidon-vsc-bundles-'));
+		try {
+			const packageJsonPath = path.join(tempRoot, 'package.json');
+			await fs.mkdir(path.join(tempRoot, 'bundles'), { recursive: true });
+			await fs.writeFile(
+				packageJsonPath,
+				JSON.stringify({
+					contributes: {
+						javaExtensions: ['bundles/io.helidon.vscode.jdt.jar'],
+					},
+				}),
+				'utf8'
+			);
+
+			const events: string[] = [];
+			const fakeJavaApi: JavaExtensionApi = {
+				async serverReady() {
+					events.push('serverReady');
+				},
+				async getClasspaths() {
+					return { classpaths: [], modulepaths: [] };
+				},
+			};
+
+			const reloaded = await reloadCurrentExtensionJavaBundles(
+				{
+					getExtension: () => ({
+						activate: async () => fakeJavaApi,
+					}),
+					executeCommand: async <T>(command: string, ...args: unknown[]) => {
+						events.push(`command:${command}:${JSON.stringify(args)}`);
+						return true as T;
+					},
+				},
+				packageJsonPath
+			);
+
+			assert.strictEqual(reloaded, true);
+			assert.deepStrictEqual(events, [
+				'serverReady',
+				`command:java.execute.workspaceCommand:${JSON.stringify([
+					'java.reloadBundles',
+					[path.join(tempRoot, 'bundles', 'io.helidon.vscode.jdt.jar')],
+				])}`,
+			]);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
 	});
 
 	test('Java config parser discovers Config.get string literals', () => {
@@ -1929,6 +2034,7 @@ suite('Extension Test Suite', () => {
 		assert.ok(manifestText);
 		assert.ok(pluginXml?.includes('org.eclipse.jdt.ls.core.delegateCommandHandler'));
 		assert.ok(pluginXml?.includes('io.helidon.vscode.resolveEndpoints'));
-		assert.ok(manifestText?.includes('Bundle-SymbolicName: io.helidon.vscode.jdt'));
+		assert.ok(manifestText?.includes('Bundle-SymbolicName: io.helidon.vscode.jdt;singleton:=true'));
+		assert.match(manifestText ?? '', /Bundle-Version: 0\.0\.1\.v[a-f0-9]{12}/u);
 	});
 });

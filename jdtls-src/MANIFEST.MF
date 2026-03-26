@@ -1,7 +1,7 @@
 Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
 Bundle-Name: Helidon VS Code JDT Integration
-Bundle-SymbolicName: io.helidon.vscode.jdt
+Bundle-SymbolicName: io.helidon.vscode.jdt;singleton:=true
 Bundle-Version: 0.0.1
 Bundle-RequiredExecutionEnvironment: JavaSE-17
 Bundle-ActivationPolicy: lazy

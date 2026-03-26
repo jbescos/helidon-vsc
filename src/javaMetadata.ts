@@ -12,8 +12,10 @@ import {
 const HELIDON_METADATA_ENTRY_PATH = 'META-INF/helidon/config-metadata.json';
 const JAVA_EXECUTE_WORKSPACE_COMMAND = 'java.execute.workspaceCommand';
 const JAVA_GET_CLASSPATHS_COMMAND = 'java.project.getClasspaths';
+const JAVA_RELOAD_BUNDLES_COMMAND = 'java.reloadBundles';
 const HELIDON_CLASSPATH_PROBE_FILE_PATTERN =
 	/^(?:application\.properties|application(?:-[^/]+)?\.yaml|microprofile-config(?:-[^/]+)?\.properties)$/u;
+const EXTENSION_PACKAGE_JSON_PATH = path.resolve(__dirname, '..', 'package.json');
 
 interface JavaClasspaths {
 	classpaths: string[];
@@ -36,6 +38,16 @@ interface JavaExtensionApiContainer {
 interface JavaWorkspaceCommandDependencies {
 	getExtension?: () => Pick<vscode.Extension<unknown>, 'activate'> | undefined;
 	executeCommand?: <T>(command: string, ...args: unknown[]) => Thenable<T | undefined>;
+}
+
+interface ExtensionPackageJson {
+	contributes?: {
+		javaExtensions?: unknown;
+	};
+}
+
+function isStringArray(value: unknown): value is string[] {
+	return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
 
 function isJavaExtensionApi(value: unknown): value is JavaExtensionApi {
@@ -185,6 +197,32 @@ export async function executeJavaWorkspaceCommand<T>(
 
 	const executeCommand = dependencies.executeCommand ?? defaultJavaWorkspaceCommandExecutor;
 	return executeCommand<T>(JAVA_EXECUTE_WORKSPACE_COMMAND, workspaceCommand, ...argumentsList);
+}
+
+async function getContributedJavaBundlePaths(packageJsonPath: string): Promise<string[]> {
+	const packageJsonText = await fs.readFile(packageJsonPath, 'utf8');
+	const packageJson = JSON.parse(packageJsonText) as ExtensionPackageJson;
+	const javaExtensions = packageJson.contributes?.javaExtensions;
+	if (!isStringArray(javaExtensions)) {
+		return [];
+	}
+
+	const extensionRoot = path.dirname(packageJsonPath);
+	return javaExtensions.map((bundlePath) => path.resolve(extensionRoot, bundlePath));
+}
+
+export async function reloadCurrentExtensionJavaBundles(
+	dependencies: JavaWorkspaceCommandDependencies = {},
+	packageJsonPath: string = EXTENSION_PACKAGE_JSON_PATH,
+): Promise<boolean> {
+	const bundlePaths = await getContributedJavaBundlePaths(packageJsonPath);
+	if (bundlePaths.length === 0) {
+		return false;
+	}
+
+	return Boolean(
+		await executeJavaWorkspaceCommand<boolean>(JAVA_RELOAD_BUNDLES_COMMAND, [bundlePaths], dependencies)
+	);
 }
 
 async function findClasspathProbeUris(folder: vscode.WorkspaceFolder): Promise<vscode.Uri[]> {

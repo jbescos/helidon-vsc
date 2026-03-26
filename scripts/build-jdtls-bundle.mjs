@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -16,6 +17,9 @@ const outputJarPath = path.join(repoRoot, 'bundles', 'io.helidon.vscode.jdt.jar'
 const buildRoot = path.join(repoRoot, 'out', 'jdtls-bundle');
 const classesRoot = path.join(buildRoot, 'classes');
 const resourcesRoot = path.join(buildRoot, 'resources');
+const generatedManifestPath = path.join(buildRoot, 'MANIFEST.MF');
+const BUNDLE_VERSION_BASE = '0.0.1';
+const BUNDLE_VERSION_PATTERN = /^Bundle-Version:\s*.+$/mu;
 
 async function listJavaFiles(root) {
 	const entries = await fs.readdir(root, { withFileTypes: true });
@@ -74,6 +78,27 @@ async function listPluginJars(pluginsDir) {
 		.sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }));
 }
 
+async function buildBundleVersion(javaFiles) {
+	const hash = createHash('sha256');
+	const inputs = [manifestPath, pluginXmlPath, ...javaFiles];
+
+	for (const inputPath of inputs) {
+		hash.update(path.relative(repoRoot, inputPath));
+		hash.update('\0');
+
+		if (inputPath === manifestPath) {
+			const manifestText = await fs.readFile(inputPath, 'utf8');
+			hash.update(manifestText.replace(BUNDLE_VERSION_PATTERN, 'Bundle-Version:'));
+		} else {
+			hash.update(await fs.readFile(inputPath));
+		}
+
+		hash.update('\0');
+	}
+
+	return `${BUNDLE_VERSION_BASE}.v${hash.digest('hex').slice(0, 12)}`;
+}
+
 async function buildBundle() {
 	const javaFiles = await listJavaFiles(javaSourceRoot);
 	if (javaFiles.length === 0) {
@@ -105,6 +130,14 @@ async function buildBundle() {
 	await fs.mkdir(path.dirname(outputJarPath), { recursive: true });
 	await fs.copyFile(pluginXmlPath, path.join(resourcesRoot, 'plugin.xml'));
 
+	const bundleVersion = await buildBundleVersion(javaFiles);
+	const manifestText = await fs.readFile(manifestPath, 'utf8');
+	await fs.writeFile(
+		generatedManifestPath,
+		manifestText.replace(BUNDLE_VERSION_PATTERN, `Bundle-Version: ${bundleVersion}`),
+		'utf8'
+	);
+
 	const classpath = pluginJars.join(path.delimiter);
 	execFileSync(
 		'javac',
@@ -119,7 +152,7 @@ async function buildBundle() {
 			'--file',
 			outputJarPath,
 			'--manifest',
-			manifestPath,
+			generatedManifestPath,
 			'-C',
 			classesRoot,
 			'.',
@@ -130,7 +163,7 @@ async function buildBundle() {
 		{ stdio: 'inherit' }
 	);
 
-	console.log(`Built ${path.relative(repoRoot, outputJarPath)} using ${redHatJavaDir}.`);
+	console.log(`Built ${path.relative(repoRoot, outputJarPath)} (${bundleVersion}) using ${redHatJavaDir}.`);
 }
 
 buildBundle().catch((error) => {

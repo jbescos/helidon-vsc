@@ -34,6 +34,8 @@ In practice, `helidon-vsc` reuses the Java tooling that `redhat.java` exposes:
 - Java classpath and metadata loading comes from the Red Hat Java extension API
 - Java workspace commands are executed through the Red Hat Java extension and wait for its language server when an API instance is available
 - Helidon endpoint discovery contributes a small JDT LS bundle through `contributes.javaExtensions`, so `io.helidon.vscode.resolveEndpoints` runs inside the same Java workspace model that the official Java extension already owns
+- the contributed JDT bundle is packaged as an OSGi singleton and rebuilt with a content-derived bundle version so JDT LS can replace stale copies when the Helidon integration changes
+- if endpoint discovery hits a missing `io.helidon.vscode.resolveEndpoints` delegate handler, `helidon-vsc` asks the Red Hat Java extension to reload the contributed bundles once and retries semantic discovery before falling back
 - Java run/debug uses the same Java debugger launch flow as the VS Code Java tooling
 - MicroProfile support is delegated to `redhat.vscode-microprofile` where that stack is already deeper than Helidon-specific custom features
 
@@ -280,6 +282,8 @@ Expected behavior:
 - clicking an endpoint opens the matching Java source location
 - Java code lenses such as `GET /{name}` appear above discovered handlers
 - the view refreshes automatically on Java edits and workspace file changes
+- Helidon SE routing and `HttpService` registrations are resolved from the shared JDT workspace model rather than from a regex-only source pass
+- if the contributed JDT handler is temporarily unavailable, endpoint discovery asks the Java extension to reload the Helidon bundle once and retries before using the JAX-RS-only fallback
 
 ### 5. Path-parameter go-to-definition
 
@@ -439,6 +443,8 @@ npm install
 npm run compile
 ```
 
+`npm run compile` rebuilds the contributed JDT bundle first. The generated jar is stamped with a content-based OSGi bundle version so local changes are picked up by JDT LS reloads.
+
 Run the test suite:
 
 ```bash
@@ -452,7 +458,7 @@ Open the repo in VS Code and press `F5` to start an Extension Development Host.
 - config filename matching is exact and conservative: supported names are exact `application.properties`, exact `microprofile-config.properties`, `microprofile-config-<profile>.properties`, exact `application.yaml`, and `application-<profile>.yaml`; files such as `application-dev.properties`, `application.yml`, `microprofile-config.yaml`, and `values.yaml` are not recognized
 - when `Tools for MicroProfile` is installed, `helidon-vsc` intentionally defers exact `application.properties` and exact `microprofile-config.properties` to that extension to avoid overlapping completion/hover/diagnostic providers; `helidon-vsc` still owns `microprofile-config-<profile>.properties`, YAML, Java `Config.get("...")`, and endpoint features
 - Java `Config.get("...")` support uses Java AST matching rather than a broad text regex now, but it still does not use full JDT symbol resolution and remains limited to direct string literals
-- endpoint discovery prefers the shared Java language-server flow; the built-in source fallback is limited to JAX-RS annotations and does not infer Helidon SE routing chains
+- endpoint discovery prefers the shared Java language-server flow; if the Helidon JDT delegate handler is missing it attempts one contributed-bundle reload and retry, but the built-in source fallback remains limited to JAX-RS annotations and does not infer Helidon SE routing chains
 - duplicate `.properties` keys are diagnosed, but there is no quick fix to remove them yet
 - YAML quick fixes are conservative and do not attempt structural rewrites for nested/list path issues
 - the Helidon CLI wizard currently runs in an integrated terminal and does not auto-open the generated project folder after `helidon init`

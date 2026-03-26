@@ -6,7 +6,7 @@ import {
 	type JavaClassInfo,
 	type JavaSourceModel,
 } from './javaSource';
-import { executeJavaWorkspaceCommand } from './javaMetadata';
+import { executeJavaWorkspaceCommand, reloadCurrentExtensionJavaBundles } from './javaMetadata';
 
 const JAVA_ENDPOINT_GLOB = '**/*.java';
 const JAVA_ENDPOINT_EXCLUDE_GLOB = '**/{.git,.gradle,.idea,node_modules,target}/**';
@@ -51,6 +51,7 @@ export interface HelidonEndpointDiscoveryOptions {
 	workspaceFolders?: readonly Pick<vscode.WorkspaceFolder, 'uri'>[];
 	commandExecutor?: (command: string, requestJson: string) => Thenable<unknown>;
 	fallbackProvider?: () => Promise<HelidonEndpointGroup[]>;
+	bundleReloader?: () => Promise<boolean>;
 }
 
 interface HelidonEndpointGroupDto {
@@ -546,8 +547,65 @@ async function defaultEndpointCommandExecutor(command: string, requestJson: stri
 	return executeJavaWorkspaceCommand(command, [requestJson]);
 }
 
+async function defaultBundleReloader(): Promise<boolean> {
+	return reloadCurrentExtensionJavaBundles();
+}
+
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+function isMissingSemanticDelegateHandler(error: unknown): boolean {
+	return errorMessage(error).includes(`No delegateCommandHandler for ${HELIDON_ENDPOINT_DISCOVERY_COMMAND}`);
+}
+
+type SemanticEndpointDiscoveryAttempt =
+	| {
+			kind: 'semantic';
+			result: HelidonEndpointDiscoveryResult;
+	  }
+	| {
+			kind: 'fallback';
+			message: string;
+	  }
+	| undefined;
+
+async function attemptSemanticEndpointDiscovery(
+	commandExecutor: (command: string, requestJson: string) => Thenable<unknown>,
+	workspaceFolders: readonly Pick<vscode.WorkspaceFolder, 'uri'>[],
+): Promise<SemanticEndpointDiscoveryAttempt> {
+	const rawResponse = await commandExecutor(
+		HELIDON_ENDPOINT_DISCOVERY_COMMAND,
+		semanticEndpointDiscoveryRequestJson(workspaceFolders)
+	);
+	const response = normalizeSemanticEndpointResponse(rawResponse);
+	if (response?.supported) {
+		return {
+			kind: 'semantic',
+			result: {
+				source: 'semantic',
+				groups: response.groups,
+				message: `Helidon endpoint discovery is using Java semantic support (${countEndpoints(response.groups)} endpoint(s)).`,
+			},
+		};
+	}
+
+	if (response?.supported === false) {
+		return {
+			kind: 'fallback',
+			message: 'Helidon endpoint discovery semantic provider reported unsupported; using source parsing fallback.',
+		};
+	}
+
+	if (rawResponse !== undefined && rawResponse !== null) {
+		return {
+			kind: 'fallback',
+			message:
+				'Helidon endpoint discovery semantic provider returned an unexpected payload; using source parsing fallback.',
+		};
+	}
+
+	return undefined;
 }
 
 export async function discoverHelidonEndpointGroups(
@@ -556,42 +614,51 @@ export async function discoverHelidonEndpointGroups(
 	const workspaceFolders = options.workspaceFolders ?? vscode.workspace.workspaceFolders ?? [];
 	const commandExecutor = options.commandExecutor ?? defaultEndpointCommandExecutor;
 	const fallbackProvider = options.fallbackProvider ?? scanWorkspaceEndpoints;
+	const bundleReloader = options.bundleReloader ?? defaultBundleReloader;
 
 	if (workspaceFolders.length > 0) {
 		try {
-			const rawResponse = await commandExecutor(
-				HELIDON_ENDPOINT_DISCOVERY_COMMAND,
-				semanticEndpointDiscoveryRequestJson(workspaceFolders)
-			);
-			const response = normalizeSemanticEndpointResponse(rawResponse);
-			if (response?.supported) {
-				return {
-					source: 'semantic',
-					groups: response.groups,
-					message: `Helidon endpoint discovery is using Java semantic support (${countEndpoints(response.groups)} endpoint(s)).`,
-				};
+			const attempt = await attemptSemanticEndpointDiscovery(commandExecutor, workspaceFolders);
+			if (attempt?.kind === 'semantic') {
+				return attempt.result;
 			}
-
-			if (response?.supported === false) {
+			if (attempt?.kind === 'fallback') {
 				const groups = sortEndpointGroups(await fallbackProvider());
 				return {
 					source: 'source-parser',
 					groups,
-					message:
-						'Helidon endpoint discovery semantic provider reported unsupported; using source parsing fallback.',
-				};
-			}
-
-			if (rawResponse !== undefined && rawResponse !== null) {
-				const groups = sortEndpointGroups(await fallbackProvider());
-				return {
-					source: 'source-parser',
-					groups,
-					message:
-						'Helidon endpoint discovery semantic provider returned an unexpected payload; using source parsing fallback.',
+					message: attempt.message,
 				};
 			}
 		} catch (error) {
+			let didReloadBundles = false;
+			if (isMissingSemanticDelegateHandler(error)) {
+				try {
+					didReloadBundles = await bundleReloader();
+				} catch {
+					didReloadBundles = false;
+				}
+			}
+
+			if (didReloadBundles) {
+				try {
+					const attempt = await attemptSemanticEndpointDiscovery(commandExecutor, workspaceFolders);
+					if (attempt?.kind === 'semantic') {
+						return attempt.result;
+					}
+					if (attempt?.kind === 'fallback') {
+						const groups = sortEndpointGroups(await fallbackProvider());
+						return {
+							source: 'source-parser',
+							groups,
+							message: attempt.message,
+						};
+					}
+				} catch (retryError) {
+					error = retryError;
+				}
+			}
+
 			const groups = sortEndpointGroups(await fallbackProvider());
 			return {
 				source: 'source-parser',
