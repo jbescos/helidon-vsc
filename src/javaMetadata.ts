@@ -33,6 +33,11 @@ interface JavaExtensionApiContainer {
 	};
 }
 
+interface JavaWorkspaceCommandDependencies {
+	getExtension?: () => Pick<vscode.Extension<unknown>, 'activate'> | undefined;
+	executeCommand?: <T>(command: string, ...args: unknown[]) => Thenable<T | undefined>;
+}
+
 function isJavaExtensionApi(value: unknown): value is JavaExtensionApi {
 	if (!value || typeof value !== 'object') {
 		return false;
@@ -61,17 +66,39 @@ function getJavaExtensionApiFromContainer(value: unknown): JavaExtensionApi | un
 	return undefined;
 }
 
+async function resolveActivatedJavaExtensionApi(
+	getExtension: () => Pick<vscode.Extension<unknown>, 'activate'> | undefined = () =>
+		vscode.extensions.getExtension('redhat.java'),
+): Promise<JavaExtensionApi | undefined> {
+	const extension = getExtension();
+	if (!extension) {
+		return undefined;
+	}
+
+	const activated = await extension.activate();
+	if (isJavaExtensionApi(activated)) {
+		return activated;
+	}
+
+	return getJavaExtensionApiFromContainer(activated);
+}
+
+function defaultJavaWorkspaceCommandExecutor<T>(command: string, ...args: unknown[]): Thenable<T | undefined> {
+	return vscode.commands.executeCommand<T>(command, ...args);
+}
+
 function createCommandBackedJavaApi(): JavaExtensionApi {
 	return {
 		async serverReady() {
 			return;
 		},
 		async getClasspaths(uri: string, options: { scope: 'runtime' | 'test' }) {
-			const result = await vscode.commands.executeCommand<JavaClasspaths | undefined>(
-				JAVA_EXECUTE_WORKSPACE_COMMAND,
+			const result = await executeJavaWorkspaceCommand<JavaClasspaths>(
 				JAVA_GET_CLASSPATHS_COMMAND,
-				uri,
-				JSON.stringify(options)
+				[uri, JSON.stringify(options)],
+				{
+					getExtension: () => undefined,
+				}
 			);
 
 			return result ?? { classpaths: [], modulepaths: [] };
@@ -130,19 +157,13 @@ async function readMetadataFromClasspathEntry(classpathEntry: string): Promise<H
 }
 
 export async function getJavaExtensionApi(): Promise<JavaExtensionApi | undefined> {
-	const extension = vscode.extensions.getExtension('redhat.java');
-	if (!extension) {
+	if (!hasJavaExtensionInstalled()) {
 		return undefined;
 	}
 
-	const activated = await extension.activate();
-	if (isJavaExtensionApi(activated)) {
-		return activated;
-	}
-
-	const containerApi = getJavaExtensionApiFromContainer(activated);
-	if (containerApi) {
-		return containerApi;
+	const activatedApi = await resolveActivatedJavaExtensionApi();
+	if (activatedApi) {
+		return activatedApi;
 	}
 
 	return createCommandBackedJavaApi();
@@ -150,6 +171,20 @@ export async function getJavaExtensionApi(): Promise<JavaExtensionApi | undefine
 
 export function hasJavaExtensionInstalled(): boolean {
 	return vscode.extensions.getExtension('redhat.java') !== undefined;
+}
+
+export async function executeJavaWorkspaceCommand<T>(
+	workspaceCommand: string,
+	argumentsList: readonly unknown[] = [],
+	dependencies: JavaWorkspaceCommandDependencies = {},
+): Promise<T | undefined> {
+	const javaApi = await resolveActivatedJavaExtensionApi(dependencies.getExtension);
+	if (javaApi) {
+		await javaApi.serverReady();
+	}
+
+	const executeCommand = dependencies.executeCommand ?? defaultJavaWorkspaceCommandExecutor;
+	return executeCommand<T>(JAVA_EXECUTE_WORKSPACE_COMMAND, workspaceCommand, ...argumentsList);
 }
 
 async function findClasspathProbeUris(folder: vscode.WorkspaceFolder): Promise<vscode.Uri[]> {

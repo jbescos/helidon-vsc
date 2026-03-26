@@ -6,11 +6,11 @@ import {
 	type JavaClassInfo,
 	type JavaSourceModel,
 } from './javaSource';
+import { executeJavaWorkspaceCommand } from './javaMetadata';
 
 const JAVA_ENDPOINT_GLOB = '**/*.java';
 const JAVA_ENDPOINT_EXCLUDE_GLOB = '**/{.git,.gradle,.idea,node_modules,target}/**';
 const HTTP_METHOD_ANNOTATIONS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'] as const;
-const JAVA_EXECUTE_WORKSPACE_COMMAND = 'java.execute.workspaceCommand';
 export const HELIDON_ENDPOINT_DISCOVERY_COMMAND = 'io.helidon.vscode.resolveEndpoints';
 const HELIDON_ENDPOINT_DISCOVERY_REQUEST_VERSION = 1;
 
@@ -542,8 +542,8 @@ function semanticEndpointDiscoveryRequestJson(workspaceFolders: readonly Pick<vs
 	});
 }
 
-function defaultEndpointCommandExecutor(command: string, requestJson: string): Thenable<unknown> {
-	return vscode.commands.executeCommand(JAVA_EXECUTE_WORKSPACE_COMMAND, command, requestJson);
+async function defaultEndpointCommandExecutor(command: string, requestJson: string): Promise<unknown> {
+	return executeJavaWorkspaceCommand(command, [requestJson]);
 }
 
 function errorMessage(error: unknown): string {

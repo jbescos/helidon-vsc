@@ -48,7 +48,11 @@ import { collectHelidonJavaDiagnostics, parseJavaConfigReferences } from '../jav
 		resolveHelidonLaunchMainClass,
 	} from '../generator';
 import { parseHelidonConfigMetadata, type HelidonConfigProperty } from '../metadata';
-import { loadHelidonConfigMetadataFromJavaClasspaths, type JavaExtensionApi } from '../javaMetadata';
+import {
+	executeJavaWorkspaceCommand,
+	loadHelidonConfigMetadataFromJavaClasspaths,
+	type JavaExtensionApi,
+} from '../javaMetadata';
 
 const TEST_METADATA_JSON = JSON.stringify([
 	{
@@ -556,6 +560,66 @@ suite('Extension Test Suite', () => {
 			result.message,
 			'Helidon endpoint discovery semantic provider returned an unexpected payload; using source parsing fallback.'
 		);
+	});
+
+	test('Java workspace commands wait for the Red Hat Java server before execution', async () => {
+		const events: string[] = [];
+		const fakeJavaApi: JavaExtensionApi = {
+			async serverReady() {
+				events.push('serverReady');
+			},
+			async getClasspaths() {
+				return { classpaths: [], modulepaths: [] };
+			},
+		};
+
+		const result = await executeJavaWorkspaceCommand<string>(
+			'io.helidon.vscode.demo',
+			['payload'],
+			{
+				getExtension: () => ({
+					activate: async () => {
+						events.push('activate');
+						return fakeJavaApi;
+					},
+				}),
+				executeCommand: async <T>(command: string, ...args: unknown[]) => {
+					events.push(`command:${command}:${args.join(':')}`);
+					return 'ok' as T;
+				},
+			}
+		);
+
+		assert.strictEqual(result, 'ok');
+		assert.deepStrictEqual(events, [
+			'activate',
+			'serverReady',
+			`command:java.execute.workspaceCommand:io.helidon.vscode.demo:payload`,
+		]);
+	});
+
+	test('Java workspace commands still execute when the Java extension API is unavailable', async () => {
+		const invocations: Array<{ command: string; args: unknown[] }> = [];
+
+		const result = await executeJavaWorkspaceCommand<string>(
+			'io.helidon.vscode.demo',
+			['payload'],
+			{
+				getExtension: () => undefined,
+				executeCommand: async <T>(command: string, ...args: unknown[]) => {
+					invocations.push({ command, args });
+					return 'ok' as T;
+				},
+			}
+		);
+
+		assert.strictEqual(result, 'ok');
+		assert.deepStrictEqual(invocations, [
+			{
+				command: 'java.execute.workspaceCommand',
+				args: ['io.helidon.vscode.demo', 'payload'],
+			},
+		]);
 	});
 
 	test('Java config parser discovers Config.get string literals', () => {

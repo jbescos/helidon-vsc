@@ -8,7 +8,7 @@ This extension currently covers:
 
 - Helidon configuration support in `.properties` and YAML files
 - Java support for Helidon `Config.get("...")` keys
-- Helidon endpoint discovery for JAX-RS and Helidon Routing code
+- Helidon endpoint discovery, with JAX-RS source parsing and Java-semantic routing support when available
 - Project generation, run, debug, and stop actions
 
 ## Requirements
@@ -32,6 +32,7 @@ Because of that, `helidon-vsc` does not bundle or launch a separate `java-langua
 In practice, `helidon-vsc` reuses the Java tooling that `redhat.java` exposes:
 
 - Java classpath and metadata loading comes from the Red Hat Java extension API
+- Java workspace commands are executed through the Red Hat Java extension and wait for its language server when an API instance is available
 - Java run/debug uses the same Java debugger launch flow as the VS Code Java tooling
 - MicroProfile support is delegated to `redhat.vscode-microprofile` where that stack is already deeper than Helidon-specific custom features
 
@@ -212,7 +213,7 @@ The extension contributes a `Helidon` view in the Explorer and groups discovered
 Supported endpoint sources:
 
 - JAX-RS resources using `@Path` and HTTP method annotations
-- Helidon Routing and service-style route registrations such as `rules.get(...)`, `routing.post(...)`, and `routing.register("/base", new Service())`
+- Java-semantic endpoint discovery from the shared Red Hat Java toolchain when available
 
 Example: JAX-RS resource
 
@@ -251,7 +252,7 @@ GreetResource
   PUT /greet/greeting
 ```
 
-Example: Helidon Routing service
+Example: Helidon Routing service resolved through Java semantic discovery
 
 ```java
 public class GreetService {
@@ -450,7 +451,7 @@ Open the repo in VS Code and press `F5` to start an Extension Development Host.
 - config filename matching is exact and conservative: supported names are exact `application.properties`, exact `microprofile-config.properties`, `microprofile-config-<profile>.properties`, exact `application.yaml`, and `application-<profile>.yaml`; files such as `application-dev.properties`, `application.yml`, `microprofile-config.yaml`, and `values.yaml` are not recognized
 - when `Tools for MicroProfile` is installed, `helidon-vsc` intentionally defers exact `application.properties` and exact `microprofile-config.properties` to that extension to avoid overlapping completion/hover/diagnostic providers; `helidon-vsc` still owns `microprofile-config-<profile>.properties`, YAML, Java `Config.get("...")`, and endpoint features
 - Java `Config.get("...")` support uses Java AST matching rather than a broad text regex now, but it still does not use full JDT symbol resolution and remains limited to direct string literals
-- endpoint discovery uses `java-parser` and source parsing, not a full semantic Java symbol model
+- endpoint discovery prefers the shared Java language-server flow; the built-in source fallback is limited to JAX-RS annotations and does not infer Helidon SE routing chains
 - duplicate `.properties` keys are diagnosed, but there is no quick fix to remove them yet
 - YAML quick fixes are conservative and do not attempt structural rewrites for nested/list path issues
 - the Helidon CLI wizard currently runs in an integrated terminal and does not auto-open the generated project folder after `helidon init`
