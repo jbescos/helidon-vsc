@@ -1886,6 +1886,7 @@ suite('Extension Test Suite', () => {
 		const manifest = JSON.parse(await fs.readFile(packageJsonPath, 'utf8')) as {
 			extensionPack?: string[];
 			contributes?: {
+				javaExtensions?: string[];
 				microprofile?: {
 					documentSelector?: Array<Record<string, string>>;
 				};
@@ -1893,6 +1894,7 @@ suite('Extension Test Suite', () => {
 		};
 
 		assert.ok(manifest.extensionPack?.includes('redhat.vscode-microprofile'));
+		assert.deepStrictEqual(manifest.contributes?.javaExtensions, ['bundles/io.helidon.vscode.jdt.jar']);
 		assert.deepStrictEqual(manifest.contributes?.microprofile?.documentSelector, [
 			{
 				scheme: 'file',
@@ -1915,5 +1917,18 @@ suite('Extension Test Suite', () => {
 				pattern: '**/application.properties',
 			},
 		]);
+	});
+
+	test('generated JDT bundle registers the Helidon endpoint command', async () => {
+		const bundlePath = path.resolve(__dirname, '..', '..', 'bundles', 'io.helidon.vscode.jdt.jar');
+		const archive = await JSZip.loadAsync(await fs.readFile(bundlePath));
+		const pluginXml = await archive.file('plugin.xml')?.async('string');
+		const manifestText = await archive.file('META-INF/MANIFEST.MF')?.async('string');
+
+		assert.ok(pluginXml);
+		assert.ok(manifestText);
+		assert.ok(pluginXml?.includes('org.eclipse.jdt.ls.core.delegateCommandHandler'));
+		assert.ok(pluginXml?.includes('io.helidon.vscode.resolveEndpoints'));
+		assert.ok(manifestText?.includes('Bundle-SymbolicName: io.helidon.vscode.jdt'));
 	});
 });

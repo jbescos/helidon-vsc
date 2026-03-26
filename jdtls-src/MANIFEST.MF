@@ -1,0 +1,8 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: Helidon VS Code JDT Integration
+Bundle-SymbolicName: io.helidon.vscode.jdt
+Bundle-Version: 0.0.1
+Bundle-RequiredExecutionEnvironment: JavaSE-17
+Bundle-ActivationPolicy: lazy
+Require-Bundle: org.eclipse.core.runtime,org.eclipse.core.resources,org.eclipse.jdt.core,org.eclipse.jdt.ls.core,com.google.gson

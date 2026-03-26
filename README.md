@@ -33,6 +33,7 @@ In practice, `helidon-vsc` reuses the Java tooling that `redhat.java` exposes:
 
 - Java classpath and metadata loading comes from the Red Hat Java extension API
 - Java workspace commands are executed through the Red Hat Java extension and wait for its language server when an API instance is available
+- Helidon endpoint discovery contributes a small JDT LS bundle through `contributes.javaExtensions`, so `io.helidon.vscode.resolveEndpoints` runs inside the same Java workspace model that the official Java extension already owns
 - Java run/debug uses the same Java debugger launch flow as the VS Code Java tooling
 - MicroProfile support is delegated to `redhat.vscode-microprofile` where that stack is already deeper than Helidon-specific custom features
 
@@ -213,7 +214,7 @@ The extension contributes a `Helidon` view in the Explorer and groups discovered
 Supported endpoint sources:
 
 - JAX-RS resources using `@Path` and HTTP method annotations
-- Java-semantic endpoint discovery from the shared Red Hat Java toolchain when available
+- Java-semantic endpoint discovery from the shared Red Hat Java toolchain, including a bundled JDT command handler for Helidon SE routing and service registrations
 
 Example: JAX-RS resource
 

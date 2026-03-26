@@ -29,6 +29,9 @@
     "redhat.vscode-microprofile"
   ],
   "contributes": {
+    "javaExtensions": [
+      "bundles/io.helidon.vscode.jdt.jar"
+    ],
     "commands": [
       {
         "command": "helidon-vsc.generateProject",
@@ -127,11 +130,12 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
-    "compile": "npm run check-types && npm run lint && node esbuild.js",
+    "build:jdt-bundle": "node scripts/build-jdtls-bundle.mjs",
+    "compile": "npm run build:jdt-bundle && npm run check-types && npm run lint && node esbuild.js",
     "watch": "npm-run-all -p watch:*",
     "watch:esbuild": "node esbuild.js --watch",
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
-    "package": "npm run check-types && npm run lint && node esbuild.js --production",
+    "package": "npm run build:jdt-bundle && npm run check-types && npm run lint && node esbuild.js --production",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",

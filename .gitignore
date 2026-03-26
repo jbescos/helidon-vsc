@@ -61,3 +61,6 @@ target/
 
 # Java bytecode
 *.class
+
+# Generated JDT bundle
+bundles/*.jar

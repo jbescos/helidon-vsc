@@ -7,3 +7,5 @@ tsconfig.json
 vsc-extension-quickstart.md
 .gitignore
 package-lock.json
+jdtls-src/**
+scripts/**
