@@ -340,7 +340,7 @@ suite('Extension Test Suite', () => {
 		assert.deepStrictEqual(endpoints, []);
 	});
 
-	test('Helidon routing parser discovers service-style route methods', async () => {
+	test('Helidon routing source parser does not infer service-style routes', async () => {
 		const endpoints = await parseJavaHelidonRoutingEndpoints(`
 			public class GreetService {
 			    void update(Routing.Rules rules) {
@@ -360,76 +360,50 @@ suite('Extension Test Suite', () => {
 			}
 		`);
 
-		assert.deepStrictEqual(
-			endpoints.map((endpoint) => ({
-				className: endpoint.className,
-				methodName: endpoint.methodName,
-				httpMethod: endpoint.httpMethod,
-				path: endpoint.path,
-			})),
-			[
-				{ className: 'GreetService', methodName: 'getDefaultMessageHandler', httpMethod: 'GET', path: '/' },
-				{ className: 'GreetService', methodName: 'getMessageHandler', httpMethod: 'GET', path: '/{name}' },
-				{ className: 'GreetService', methodName: 'updateGreetingHandler', httpMethod: 'PUT', path: '/greeting' },
-			]
-		);
+		assert.deepStrictEqual(endpoints, []);
 	});
 
-		test('Helidon routing parser resolves local string values for route paths', async () => {
-			const endpoints = await parseJavaHelidonRoutingEndpoints(`
+	test('Helidon routing source parser ignores config lookups', async () => {
+		const endpoints = await parseJavaHelidonRoutingEndpoints(`
 			public class GreetService {
-			    void update(Routing.Rules rules) {
-			        String greetingPath = "/greeting";
-			        rules.put(greetingPath, this::updateGreetingHandler);
-			    }
-
-			    void updateGreetingHandler(ServerRequest req, ServerResponse res) {
+			    void update(Config config) {
+			        config.get("server.port").asInt();
 			    }
 			}
 		`);
 
-			assert.deepStrictEqual(
-				endpoints.map((endpoint) => ({
-					className: endpoint.className,
-					methodName: endpoint.methodName,
-					httpMethod: endpoint.httpMethod,
-					path: endpoint.path,
-				})),
-				[
-					{ className: 'GreetService', methodName: 'updateGreetingHandler', httpMethod: 'PUT', path: '/greeting' },
-				]
-			);
+		assert.deepStrictEqual(endpoints, []);
+	});
+
+	test('semantic path-parameter reference detection recognizes req.path().param lookups', () => {
+		const source = [
+			'class Demo {',
+			'  void handle(ServerRequest req) {',
+			'    String name = req.path().param("name");',
+			'  }',
+			'}',
+		].join('\n');
+
+		const offset = source.indexOf('name");') + 2;
+		assert.deepStrictEqual(findSemanticPathParameterReference(source, offset), {
+			value: 'name',
+			start: source.indexOf('"name"') + 1,
+			end: source.indexOf('"name"') + 5,
 		});
+	});
 
-		test('semantic path-parameter reference detection recognizes req.path().param lookups', () => {
-			const source = [
-				'class Demo {',
-				'  void handle(ServerRequest req) {',
-				'    String name = req.path().param("name");',
-				'  }',
-				'}',
-			].join('\n');
+	test('semantic path-parameter reference detection ignores unrelated param calls', () => {
+		const source = [
+			'class Demo {',
+			'  void handle(CustomParams params) {',
+			'    String name = params.param("name");',
+			'  }',
+			'}',
+		].join('\n');
 
-			const offset = source.indexOf('name");') + 2;
-			assert.deepStrictEqual(findSemanticPathParameterReference(source, offset), {
-				value: 'name',
-				start: source.indexOf('"name"') + 1,
-				end: source.indexOf('"name"') + 5,
-			});
-		});
-
-		test('semantic path-parameter reference detection ignores unrelated param calls', () => {
-			const source = [
-				'class Demo {',
-				'  void handle(CustomParams params) {',
-				'    String name = params.param("name");',
-				'  }',
-				'}',
-			].join('\n');
-
-			const offset = source.indexOf('name");') + 2;
-			assert.strictEqual(findSemanticPathParameterReference(source, offset), undefined);
-		});
+		const offset = source.indexOf('name");') + 2;
+		assert.strictEqual(findSemanticPathParameterReference(source, offset), undefined);
+	});
 
 		test('path-parameter endpoint matching stays scoped to the enclosing handler method', () => {
 			const uri = vscode.Uri.file('/tmp/helidon-path-parameter/GreetService.java');

@@ -4,15 +4,12 @@ import {
 	parseJavaSourceModel,
 	type JavaAnnotationInfo,
 	type JavaClassInfo,
-	type JavaExpressionInfo,
-	type JavaInvocationInfo,
 	type JavaSourceModel,
 } from './javaSource';
 
 const JAVA_ENDPOINT_GLOB = '**/*.java';
 const JAVA_ENDPOINT_EXCLUDE_GLOB = '**/{.git,.gradle,.idea,node_modules,target}/**';
 const HTTP_METHOD_ANNOTATIONS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'] as const;
-const ROUTING_HTTP_METHODS = ['get', 'post', 'put', 'delete', 'patch', 'head', 'options', 'trace'] as const;
 const JAVA_EXECUTE_WORKSPACE_COMMAND = 'java.execute.workspaceCommand';
 export const HELIDON_ENDPOINT_DISCOVERY_COMMAND = 'io.helidon.vscode.resolveEndpoints';
 const HELIDON_ENDPOINT_DISCOVERY_REQUEST_VERSION = 1;
@@ -87,27 +84,6 @@ interface ParsedRouteDefinition {
 	line: number;
 }
 
-interface ParsedServiceRegistration {
-	className: string;
-	serviceClassName: string;
-	basePath: string;
-	line: number;
-}
-
-interface PendingRouteDefinition {
-	className: string;
-	httpMethod: string;
-	path: string;
-	line: number;
-	ownerMethodName?: string;
-	handlerMethodName?: string;
-}
-
-interface ParsedJavaRoutingModel {
-	routes: ParsedRouteDefinition[];
-	registrations: ParsedServiceRegistration[];
-}
-
 export interface HelidonJavaMethodContext {
 	name?: string;
 	line: number;
@@ -165,96 +141,6 @@ function walkJavaClasses(classes: readonly JavaClassInfo[], consumer: (classInfo
 	}
 }
 
-function firstStringArgument(
-	argumentsList: readonly JavaExpressionInfo[],
-): Extract<JavaExpressionInfo, { kind: 'string' }> | undefined {
-	return argumentsList.find((argument): argument is Extract<JavaExpressionInfo, { kind: 'string' }> => argument.kind === 'string');
-}
-
-function firstMethodReferenceArgument(
-	argumentsList: readonly JavaExpressionInfo[],
-): Extract<JavaExpressionInfo, { kind: 'methodReference' }> | undefined {
-	return argumentsList.find(
-		(argument): argument is Extract<JavaExpressionInfo, { kind: 'methodReference' }> => argument.kind === 'methodReference'
-	);
-}
-
-function hasLambdaArgument(argumentsList: readonly JavaExpressionInfo[]): boolean {
-	return argumentsList.some((argument) => argument.kind === 'lambda');
-}
-
-function serviceRegistrationFromInvocation(
-	invocation: JavaInvocationInfo,
-	className: string,
-): ParsedServiceRegistration | undefined {
-	if (invocation.name !== 'register') {
-		return undefined;
-	}
-
-	const service = invocation.arguments.find(
-		(argument): argument is Extract<JavaExpressionInfo, { kind: 'newClass' }> => argument.kind === 'newClass'
-	);
-	if (!service) {
-		return undefined;
-	}
-
-	return {
-		className,
-		serviceClassName: service.className,
-		basePath: firstStringArgument(invocation.arguments)?.value ?? '/',
-		line: invocation.line,
-	};
-}
-
-function routeDefinitionFromInvocation(
-	invocation: JavaInvocationInfo,
-	className: string,
-	ownerMethodName: string,
-): PendingRouteDefinition | undefined {
-	const invocationName = invocation.name.toLowerCase();
-	const handler = firstMethodReferenceArgument(invocation.arguments);
-	const path = firstStringArgument(invocation.arguments);
-
-	if (ROUTING_HTTP_METHODS.includes(invocationName as typeof ROUTING_HTTP_METHODS[number])) {
-		if (path) {
-			return {
-				className,
-				httpMethod: invocationName.toUpperCase(),
-				path: path.value,
-				line: invocation.line,
-				ownerMethodName,
-				handlerMethodName: handler?.methodName,
-			};
-		}
-
-		if (handler || hasLambdaArgument(invocation.arguments)) {
-			return {
-				className,
-				httpMethod: invocationName.toUpperCase(),
-				path: '/',
-				line: invocation.line,
-				ownerMethodName,
-				handlerMethodName: handler?.methodName,
-			};
-		}
-
-		return undefined;
-	}
-
-	if (invocationName !== 'anyof' || !path) {
-		return undefined;
-	}
-
-	return {
-		className,
-		httpMethod: 'ANY_OF',
-		path: path.value,
-		line: invocation.line,
-		ownerMethodName,
-		handlerMethodName: handler?.methodName,
-	};
-}
-
 function jaxRsEndpointsFromModel(model: JavaSourceModel): Omit<HelidonEndpoint, 'relativePath' | 'uri'>[] {
 	const endpoints: Omit<HelidonEndpoint, 'relativePath' | 'uri'>[] = [];
 	walkJavaClasses(model.classes, (classInfo) => {
@@ -279,74 +165,26 @@ function jaxRsEndpointsFromModel(model: JavaSourceModel): Omit<HelidonEndpoint, 
 	return endpoints;
 }
 
-function routingModelFromParsedSource(model: JavaSourceModel): ParsedJavaRoutingModel {
-	const methodLinesByClass = new Map<string, Map<string, number>>();
-	const routes: PendingRouteDefinition[] = [];
-	const registrations: ParsedServiceRegistration[] = [];
-
-	walkJavaClasses(model.classes, (classInfo) => {
-		methodLinesByClass.set(
-			classInfo.name,
-			new Map(classInfo.methods.map((method) => [method.name, method.line]))
-		);
-
-		for (const method of classInfo.methods) {
-			for (const invocation of method.invocations) {
-				const route = routeDefinitionFromInvocation(invocation, classInfo.name, method.name);
-				if (route) {
-					routes.push(route);
-				}
-
-				const registration = serviceRegistrationFromInvocation(invocation, classInfo.name);
-				if (registration) {
-					registrations.push(registration);
-				}
-			}
-		}
-	});
-
-	return {
-		routes: routes.map((route) => {
-			const methodLines = methodLinesByClass.get(route.className);
-			const resolvedMethodName = route.handlerMethodName ?? route.ownerMethodName ?? `${route.httpMethod.toLowerCase()}Route`;
-			return {
-				className: route.className,
-				methodName: resolvedMethodName,
-				httpMethod: route.httpMethod,
-				path: route.path,
-				line: route.handlerMethodName ? methodLines?.get(route.handlerMethodName) ?? route.line : route.line,
-			};
-		}),
-		registrations,
-	};
-}
-
 export async function parseJavaJaxRsEndpoints(source: string): Promise<Omit<HelidonEndpoint, 'relativePath' | 'uri'>[]> {
 	const model = await parseJavaSourceModel(source);
 	return model ? jaxRsEndpointsFromModel(model) : [];
 }
 
-async function parseJavaRoutingModel(source: string): Promise<ParsedJavaRoutingModel> {
-	const model = await parseJavaSourceModel(source);
-	return model ? routingModelFromParsedSource(model) : { routes: [], registrations: [] };
-}
-
+// Source parsing intentionally supports JAX-RS only. Helidon SE discovery is left to the semantic/JDT flow.
 export async function parseJavaHelidonRoutingEndpoints(source: string): Promise<ParsedRouteDefinition[]> {
-	return (await parseJavaRoutingModel(source)).routes;
+	void source;
+	return [];
 }
 
 async function scanWorkspaceEndpoints(): Promise<HelidonEndpointGroup[]> {
 	const files = await vscode.workspace.findFiles(JAVA_ENDPOINT_GLOB, JAVA_ENDPOINT_EXCLUDE_GLOB);
 	const groupedByClass = new Map<string, HelidonEndpointGroup>();
-	const routeDefinitionsByClass = new Map<string, HelidonEndpoint[]>();
-	const registrations: Array<ParsedServiceRegistration & { uri: vscode.Uri }> = [];
 
 	for (const file of files) {
 		const source = Buffer.from(await vscode.workspace.fs.readFile(file)).toString('utf8');
 		const relativePath = vscode.workspace.asRelativePath(file, false);
 		const model = await parseJavaSourceModel(source);
 		const jaxRsEndpoints = model ? jaxRsEndpointsFromModel(model) : [];
-		const routingModel = model ? routingModelFromParsedSource(model) : { routes: [], registrations: [] };
 
 		for (const endpoint of jaxRsEndpoints) {
 			addEndpoint(groupedByClass, {
@@ -354,52 +192,6 @@ async function scanWorkspaceEndpoints(): Promise<HelidonEndpointGroup[]> {
 				relativePath,
 				uri: file,
 			});
-		}
-
-		for (const route of routingModel.routes) {
-			const endpoints = routeDefinitionsByClass.get(route.className) ?? [];
-			endpoints.push({
-				...route,
-				relativePath,
-				uri: file,
-			});
-			routeDefinitionsByClass.set(route.className, endpoints);
-		}
-
-		for (const registration of routingModel.registrations) {
-			registrations.push({ ...registration, uri: file });
-		}
-	}
-
-	const registeredClasses = new Set(registrations.map((registration) => registration.serviceClassName));
-	for (const registration of registrations) {
-		const serviceEndpoints = routeDefinitionsByClass.get(registration.serviceClassName);
-		if (!serviceEndpoints || serviceEndpoints.length === 0) {
-			addEndpoint(groupedByClass, {
-				className: registration.serviceClassName,
-				methodName: 'register',
-				httpMethod: 'REGISTER',
-				path: joinEndpointPath(registration.basePath, '/'),
-				relativePath: vscode.workspace.asRelativePath(registration.uri, false),
-				uri: registration.uri,
-				line: registration.line,
-			});
-			continue;
-		}
-
-		for (const endpoint of serviceEndpoints) {
-			addEndpoint(groupedByClass, {
-				...endpoint,
-				path: joinEndpointPath(registration.basePath, endpoint.path),
-			});
-		}
-	}
-
-	for (const endpoints of routeDefinitionsByClass.values()) {
-		for (const endpoint of endpoints) {
-			if (!registeredClasses.has(endpoint.className)) {
-				addEndpoint(groupedByClass, endpoint);
-			}
 		}
 	}
 
