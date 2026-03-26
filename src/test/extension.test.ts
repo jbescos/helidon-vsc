@@ -18,28 +18,32 @@ import {
 	isMicroProfileManagedHelidonPropertiesFile,
 	shouldUseCustomHelidonPropertiesFeatures,
 } from '../extension';
-import {
-	collectHelidonPropertiesDiagnostics,
-	collectHelidonYamlDiagnostics,
-	HelidonConfigCodeActionProvider,
-	findHelidonConfigProperty,
-	isHelidonPropertiesDocument,
+	import {
+		collectHelidonPropertiesDiagnostics,
+		collectHelidonYamlDiagnostics,
+		findHelidonConfigKeyRanges,
+		HelidonConfigCodeActionProvider,
+		findHelidonConfigProperty,
+		isHelidonPropertiesDocument,
 	isHelidonYamlDocument,
 	replaceHelidonConfigProperties,
 } from '../helidonConfig';
 import { collectHelidonJavaDiagnostics, parseJavaConfigReferences } from '../javaConfig';
-import {
-	buildHelidonLaunchConfiguration,
-	buildHelidonRunTask,
-	buildLegacyMavenGenerateArgs,
+	import {
+		buildHelidonBuildTask,
+		buildHelidonLaunchConfiguration,
+		buildHelidonRunTask,
+		buildLegacyMavenGenerateArgs,
 	buildProjectGenerationModePicks,
 	extractWorkspaceUriFromTarget,
-	isHelidonDebugSession,
-	isHelidonTaskExecution,
-	isLikelyHelidonMicroProfileProject,
-	LEGACY_ARCHETYPES,
-	resolveHelidonLaunchMainClass,
-} from '../generator';
+		isHelidonDebugSession,
+		isHelidonTaskExecution,
+		isLikelyHelidonMicroProfileProject,
+		LEGACY_ARCHETYPES,
+		parseJsonWithComments,
+		resolveGradleCommand,
+		resolveHelidonLaunchMainClass,
+	} from '../generator';
 import { parseHelidonConfigMetadata, type HelidonConfigProperty } from '../metadata';
 import { loadHelidonConfigMetadataFromJavaClasspaths, type JavaExtensionApi } from '../javaMetadata';
 
@@ -607,6 +611,14 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(isHelidonPropertiesDocument(document), true);
 	});
 
+	test('Windows-style application.properties paths are recognized as Helidon properties documents', () => {
+		const document = {
+			fileName: 'C:\\demo\\application.properties',
+			languageId: 'plaintext',
+		} as vscode.TextDocument;
+		assert.strictEqual(isHelidonPropertiesDocument(document), true);
+	});
+
 	test('application-dev.properties is not recognized as a Helidon properties document', () => {
 		const document = {
 			fileName: '/tmp/application-dev.properties',
@@ -683,6 +695,14 @@ suite('Extension Test Suite', () => {
 	test('application-prod.yaml is recognized as a Helidon YAML document', () => {
 		const document = {
 			fileName: '/tmp/application-prod.yaml',
+			languageId: 'yaml',
+		} as vscode.TextDocument;
+		assert.strictEqual(isHelidonYamlDocument(document), true);
+	});
+
+	test('Windows-style application.yaml paths are recognized as Helidon YAML documents', () => {
+		const document = {
+			fileName: 'C:\\demo\\application.yaml',
 			languageId: 'yaml',
 		} as vscode.TextDocument;
 		assert.strictEqual(isHelidonYamlDocument(document), true);
@@ -905,6 +925,22 @@ suite('Extension Test Suite', () => {
 				diagnostics[0].message,
 				"Duplicate Helidon configuration key 'logging.loggers.0.name'. Previous declaration is on line 1."
 			);
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+			}
+		});
+
+	test('definition lookup normalizes equivalent indexed properties keys', async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'helidon-vsc-properties-definition-'));
+		try {
+			const filePath = path.join(tempRoot, 'microprofile-config.properties');
+			await fs.writeFile(filePath, 'logging.loggers[0].name=demo', 'utf8');
+			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+
+			seedTestMetadata();
+			const ranges = findHelidonConfigKeyRanges(document, 'logging.loggers.0.name');
+			assert.strictEqual(ranges.length, 1);
+			assert.strictEqual(document.getText(ranges[0]), 'logging.loggers[0].name');
 		} finally {
 			await fs.rm(tempRoot, { recursive: true, force: true });
 		}
@@ -1552,6 +1588,26 @@ suite('Extension Test Suite', () => {
 		);
 	});
 
+	test('JSONC parser tolerates comments and trailing commas in VS Code config files', () => {
+		const parsed = parseJsonWithComments(
+			[
+				'{',
+				'  // keep user launch config',
+				'  "version": "0.2.0",',
+				'  "configurations": [',
+				'    {',
+				'      "name": "Existing",',
+				'    },',
+				'  ],',
+				'}',
+			].join('\n'),
+			{ version: '', configurations: [] as Array<{ name: string }> }
+		);
+
+		assert.strictEqual(parsed.version, '0.2.0');
+		assert.deepStrictEqual(parsed.configurations.map((configuration) => configuration.name), ['Existing']);
+	});
+
 	test('MicroProfile projects fall back to io.helidon.Main when no Java main class is discovered', () => {
 		assert.strictEqual(resolveHelidonLaunchMainClass(undefined, true), 'io.helidon.Main');
 		assert.strictEqual(resolveHelidonLaunchMainClass('com.example.Main', true), 'com.example.Main');
@@ -1579,6 +1635,39 @@ suite('Extension Test Suite', () => {
 			args: ['compile', 'org.codehaus.mojo:exec-maven-plugin:3.6.2:java', '-Dexec.mainClass=io.helidon.Main'],
 			problemMatcher: [],
 		});
+	});
+
+	test('Gradle tasks honor the resolved Gradle command', () => {
+		assert.deepStrictEqual(buildHelidonBuildTask('gradle', './gradlew'), {
+			label: 'helidon: build',
+			type: 'shell',
+			command: './gradlew',
+			args: ['build'],
+			group: 'build',
+			problemMatcher: [],
+		});
+		assert.deepStrictEqual(buildHelidonRunTask('gradle', 'io.helidon.Main', '.\\gradlew.bat'), {
+			label: 'helidon: run',
+			type: 'shell',
+			command: '.\\gradlew.bat',
+			args: ['run'],
+			problemMatcher: [],
+		});
+	});
+
+	test('Gradle command resolution prefers wrappers and falls back to gradle', async () => {
+		const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'helidon-vsc-gradle-'));
+		try {
+			assert.strictEqual(await resolveGradleCommand(tempRoot, 'linux'), 'gradle');
+			await fs.writeFile(path.join(tempRoot, 'gradlew'), '#!/bin/sh\n', 'utf8');
+			assert.strictEqual(await resolveGradleCommand(tempRoot, 'linux'), './gradlew');
+
+			await fs.rm(path.join(tempRoot, 'gradlew'), { force: true });
+			await fs.writeFile(path.join(tempRoot, 'gradlew.bat'), '@echo off\r\n', 'utf8');
+			assert.strictEqual(await resolveGradleCommand(tempRoot, 'win32'), '.\\gradlew.bat');
+		} finally {
+			await fs.rm(tempRoot, { recursive: true, force: true });
+		}
 	});
 
 	test('MicroProfile project detection recognizes pom.xml markers and config layout', async () => {

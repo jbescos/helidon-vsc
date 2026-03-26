@@ -17,8 +17,8 @@ let normalizedHelidonConfigPropertyByKey = new Map<string, HelidonConfigProperty
 let helidonConfigSchemaRoot: ConfigSchemaNode = { children: new Map() };
 const YAML_KEY_SEGMENT_PATTERN = /[A-Za-z0-9_-]+/;
 const HELIDON_APPLICATION_PROPERTIES_PATTERN =
-	/(?:^|\/)(?:application|microprofile-config(?:-[^/]+)?)\.properties$/iu;
-const HELIDON_APPLICATION_YAML_PATTERN = /(?:^|\/)application(?:-[^/]+)?\.yaml$/iu;
+	/(?:^|[\\/])(?:application|microprofile-config(?:-[^\\/]+)?)\.properties$/iu;
+const HELIDON_APPLICATION_YAML_PATTERN = /(?:^|[\\/])application(?:-[^\\/]+)?\.yaml$/iu;
 
 interface ConfigKeyDiagnosticTarget {
 	key: string;
@@ -1448,11 +1448,12 @@ export function collectHelidonDiagnostics(document: vscode.TextDocument): vscode
 }
 
 export function findHelidonConfigKeyRanges(document: vscode.TextDocument, key: string): vscode.Range[] {
+	const normalizedTargetKey = normalizeConfigKey(key);
 	if (isHelidonPropertiesDocument(document)) {
 		const ranges: vscode.Range[] = [];
 		for (let lineIndex = 0; lineIndex < document.lineCount; lineIndex++) {
 			const assignment = parsePropertiesAssignment(document, lineIndex);
-			if (assignment && assignment.key === key) {
+			if (assignment && normalizeConfigKey(assignment.key) === normalizedTargetKey) {
 				ranges.push(assignment.keyRange);
 			}
 		}
@@ -1461,7 +1462,7 @@ export function findHelidonConfigKeyRanges(document: vscode.TextDocument, key: s
 
 	if (isHelidonYamlDocument(document)) {
 		return yamlKeyEntries(document)
-			.filter((entry) => entry.key === key)
+			.filter((entry) => normalizeConfigKey(entry.key) === normalizedTargetKey)
 			.map((entry) => entry.range);
 	}
 

@@ -61,6 +61,134 @@ export const LEGACY_ARCHETYPES = [
 	{ label: 'Helidon Database MP', value: 'helidon-database-mp' },
 ] as const;
 
+function stripJsonComments(jsonText: string): string {
+	let result = '';
+	let inString = false;
+	let inSingleLineComment = false;
+	let inMultiLineComment = false;
+	let escaped = false;
+
+	for (let index = 0; index < jsonText.length; index += 1) {
+		const character = jsonText[index];
+		const nextCharacter = jsonText[index + 1];
+		if (inSingleLineComment) {
+			if (character === '\n' || character === '\r') {
+				inSingleLineComment = false;
+				result += character;
+			}
+			continue;
+		}
+
+		if (inMultiLineComment) {
+			if (character === '*' && nextCharacter === '/') {
+				inMultiLineComment = false;
+				index += 1;
+				continue;
+			}
+			if (character === '\n' || character === '\r') {
+				result += character;
+			}
+			continue;
+		}
+
+		if (inString) {
+			result += character;
+			if (escaped) {
+				escaped = false;
+				continue;
+			}
+			if (character === '\\') {
+				escaped = true;
+				continue;
+			}
+			if (character === '"') {
+				inString = false;
+			}
+			continue;
+		}
+
+		if (character === '"') {
+			inString = true;
+			result += character;
+			continue;
+		}
+
+		if (character === '/' && nextCharacter === '/') {
+			inSingleLineComment = true;
+			index += 1;
+			continue;
+		}
+
+		if (character === '/' && nextCharacter === '*') {
+			inMultiLineComment = true;
+			index += 1;
+			continue;
+		}
+
+		result += character;
+	}
+
+	return result;
+}
+
+function stripTrailingCommas(jsonText: string): string {
+	let result = '';
+	let inString = false;
+	let escaped = false;
+
+	for (let index = 0; index < jsonText.length; index += 1) {
+		const character = jsonText[index];
+		if (inString) {
+			result += character;
+			if (escaped) {
+				escaped = false;
+				continue;
+			}
+			if (character === '\\') {
+				escaped = true;
+				continue;
+			}
+			if (character === '"') {
+				inString = false;
+			}
+			continue;
+		}
+
+		if (character === '"') {
+			inString = true;
+			result += character;
+			continue;
+		}
+
+		if (character === ',') {
+			let lookahead = index + 1;
+			while (lookahead < jsonText.length && /\s/u.test(jsonText[lookahead])) {
+				lookahead += 1;
+			}
+			if (jsonText[lookahead] === '}' || jsonText[lookahead] === ']') {
+				continue;
+			}
+		}
+
+		result += character;
+	}
+
+	return result;
+}
+
+export function parseJsonWithComments<T>(jsonText: string, fallback: T): T {
+	const normalizedText = jsonText.replace(/^\uFEFF/u, '');
+	try {
+		return JSON.parse(normalizedText) as T;
+	} catch {
+		try {
+			return JSON.parse(stripTrailingCommas(stripJsonComments(normalizedText))) as T;
+		} catch {
+			return fallback;
+		}
+	}
+}
+
 async function promptForTargetDirectory(openLabel: string): Promise<string | undefined> {
 	const folderPick = await vscode.window.showOpenDialog({
 		canSelectFolders: true,
@@ -423,10 +551,22 @@ async function readFileIfExists(filePath: string): Promise<string | undefined> {
 
 async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {
 	try {
-		return JSON.parse(await fs.readFile(filePath, 'utf8')) as T;
+		return parseJsonWithComments(await fs.readFile(filePath, 'utf8'), fallback);
 	} catch {
 		return fallback;
 	}
+}
+
+export async function resolveGradleCommand(
+	workspacePath: string,
+	platform: NodeJS.Platform = process.platform
+): Promise<string> {
+	const wrapperFileName = platform === 'win32' ? 'gradlew.bat' : 'gradlew';
+	if (await pathExists(path.join(workspacePath, wrapperFileName))) {
+		return platform === 'win32' ? '.\\gradlew.bat' : './gradlew';
+	}
+
+	return 'gradle';
 }
 
 function upsertNamedEntry<T extends Record<string, unknown>>(
@@ -510,7 +650,10 @@ async function detectHelidonLaunchMainClass(workspacePath: string): Promise<stri
 	return resolveHelidonLaunchMainClass(discoveredMainClass, isMicroProfileProject);
 }
 
-export function buildHelidonBuildTask(buildTool: HelidonBuildTool): Record<string, unknown> {
+export function buildHelidonBuildTask(
+	buildTool: HelidonBuildTool,
+	gradleCommand = 'gradle'
+): Record<string, unknown> {
 	return buildTool === 'maven'
 		? {
 				label: HELIDON_BUILD_TASK_LABEL,
@@ -520,17 +663,21 @@ export function buildHelidonBuildTask(buildTool: HelidonBuildTool): Record<strin
 				group: 'build',
 				problemMatcher: [],
 			}
-		: {
-				label: HELIDON_BUILD_TASK_LABEL,
-				type: 'shell',
-				command: './gradlew',
-				args: ['build'],
-				group: 'build',
-				problemMatcher: [],
-			};
+			: {
+					label: HELIDON_BUILD_TASK_LABEL,
+					type: 'shell',
+					command: gradleCommand,
+					args: ['build'],
+					group: 'build',
+					problemMatcher: [],
+				};
 }
 
-export function buildHelidonRunTask(buildTool: HelidonBuildTool, mainClass: string): Record<string, unknown> {
+export function buildHelidonRunTask(
+	buildTool: HelidonBuildTool,
+	mainClass: string,
+	gradleCommand = 'gradle'
+): Record<string, unknown> {
 	return buildTool === 'maven'
 		? {
 				label: HELIDON_RUN_TASK_LABEL,
@@ -539,13 +686,13 @@ export function buildHelidonRunTask(buildTool: HelidonBuildTool, mainClass: stri
 				args: ['compile', 'org.codehaus.mojo:exec-maven-plugin:3.6.2:java', `-Dexec.mainClass=${mainClass}`],
 				problemMatcher: [],
 			}
-		: {
-				label: HELIDON_RUN_TASK_LABEL,
-				type: 'shell',
-				command: './gradlew',
-				args: ['run'],
-				problemMatcher: [],
-			};
+			: {
+					label: HELIDON_RUN_TASK_LABEL,
+					type: 'shell',
+					command: gradleCommand,
+					args: ['run'],
+					problemMatcher: [],
+				};
 }
 
 export function buildHelidonLaunchConfiguration(mainClass: string): vscode.DebugConfiguration {
@@ -608,13 +755,15 @@ async function prepareHelidonRunSupport(workspaceFolder: vscode.WorkspaceFolder)
 		return undefined;
 	}
 
+	const gradleCommand = buildTool === 'gradle' ? await resolveGradleCommand(workspacePath) : undefined;
+
 	return {
 		workspaceFolder,
 		workspacePath,
 		buildTool,
 		mainClass,
-		buildTask: buildHelidonBuildTask(buildTool),
-		runTask: buildHelidonRunTask(buildTool, mainClass),
+		buildTask: buildHelidonBuildTask(buildTool, gradleCommand),
+		runTask: buildHelidonRunTask(buildTool, mainClass, gradleCommand),
 		launchConfiguration: buildHelidonLaunchConfiguration(mainClass),
 	};
 }
