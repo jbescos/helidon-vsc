@@ -7,12 +7,15 @@ import JSZip = require('jszip');
 // You can import and use all API from the 'vscode' module
 // as well as import your extension to test it
 import * as vscode from 'vscode';
-import {
-	discoverHelidonEndpointGroups,
-	HELIDON_ENDPOINT_DISCOVERY_COMMAND,
-	parseJavaHelidonRoutingEndpoints,
-	parseJavaJaxRsEndpoints,
-} from '../endpoints';
+	import {
+		discoverHelidonEndpointGroups,
+		findPathParameterEndpointLocations,
+		findSemanticPathParameterReference,
+		HELIDON_ENDPOINT_DISCOVERY_COMMAND,
+		type HelidonJavaMethodContext,
+		parseJavaHelidonRoutingEndpoints,
+		parseJavaJaxRsEndpoints,
+	} from '../endpoints';
 import {
 	buildHelidonPropertiesDocumentSelectors,
 	isMicroProfileManagedHelidonPropertiesFile,
@@ -372,8 +375,8 @@ suite('Extension Test Suite', () => {
 		);
 	});
 
-	test('Helidon routing parser resolves local string values for route paths', async () => {
-		const endpoints = await parseJavaHelidonRoutingEndpoints(`
+		test('Helidon routing parser resolves local string values for route paths', async () => {
+			const endpoints = await parseJavaHelidonRoutingEndpoints(`
 			public class GreetService {
 			    void update(Routing.Rules rules) {
 			        String greetingPath = "/greeting";
@@ -385,21 +388,88 @@ suite('Extension Test Suite', () => {
 			}
 		`);
 
-		assert.deepStrictEqual(
-			endpoints.map((endpoint) => ({
-				className: endpoint.className,
-				methodName: endpoint.methodName,
-				httpMethod: endpoint.httpMethod,
-				path: endpoint.path,
-			})),
-			[
-				{ className: 'GreetService', methodName: 'updateGreetingHandler', httpMethod: 'PUT', path: '/greeting' },
-			]
-		);
-	});
+			assert.deepStrictEqual(
+				endpoints.map((endpoint) => ({
+					className: endpoint.className,
+					methodName: endpoint.methodName,
+					httpMethod: endpoint.httpMethod,
+					path: endpoint.path,
+				})),
+				[
+					{ className: 'GreetService', methodName: 'updateGreetingHandler', httpMethod: 'PUT', path: '/greeting' },
+				]
+			);
+		});
 
-	test('endpoint discovery prefers semantic Java results when available', async () => {
-		const workspaceUri = vscode.Uri.file('/tmp/helidon-semantic-workspace');
+		test('semantic path-parameter reference detection recognizes req.path().param lookups', () => {
+			const source = [
+				'class Demo {',
+				'  void handle(ServerRequest req) {',
+				'    String name = req.path().param("name");',
+				'  }',
+				'}',
+			].join('\n');
+
+			const offset = source.indexOf('name");') + 2;
+			assert.deepStrictEqual(findSemanticPathParameterReference(source, offset), {
+				value: 'name',
+				start: source.indexOf('"name"') + 1,
+				end: source.indexOf('"name"') + 5,
+			});
+		});
+
+		test('semantic path-parameter reference detection ignores unrelated param calls', () => {
+			const source = [
+				'class Demo {',
+				'  void handle(CustomParams params) {',
+				'    String name = params.param("name");',
+				'  }',
+				'}',
+			].join('\n');
+
+			const offset = source.indexOf('name");') + 2;
+			assert.strictEqual(findSemanticPathParameterReference(source, offset), undefined);
+		});
+
+		test('path-parameter endpoint matching stays scoped to the enclosing handler method', () => {
+			const uri = vscode.Uri.file('/tmp/helidon-path-parameter/GreetService.java');
+			const methodContext: HelidonJavaMethodContext = {
+				name: 'getMessageHandler(ServerRequest req, ServerResponse res)',
+				line: 10,
+				range: new vscode.Range(10, 0, 14, 0),
+			};
+
+			const locations = findPathParameterEndpointLocations(
+				[
+					{
+						className: 'GreetService',
+						methodName: 'getMessageHandler',
+						httpMethod: 'GET',
+						path: '/greet/{name}',
+						relativePath: 'src/main/java/GreetService.java',
+						uri,
+						line: 10,
+					},
+					{
+						className: 'GreetService',
+						methodName: 'auditHandler',
+						httpMethod: 'GET',
+						path: '/audit/{name}',
+						relativePath: 'src/main/java/GreetService.java',
+						uri,
+						line: 20,
+					},
+				],
+				'name',
+				methodContext
+			);
+
+			assert.strictEqual(locations.length, 1);
+			assert.strictEqual(locations[0].range.start.line, 10);
+		});
+
+		test('endpoint discovery prefers semantic Java results when available', async () => {
+			const workspaceUri = vscode.Uri.file('/tmp/helidon-semantic-workspace');
 		const endpointUri = vscode.Uri.file('/tmp/helidon-semantic-workspace/src/main/java/GreetResource.java');
 		let fallbackInvoked = false;
 

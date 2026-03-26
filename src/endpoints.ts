@@ -36,6 +36,9 @@ interface HelidonEndpointGroup {
 }
 
 type HelidonEndpointDiscoverySource = 'semantic' | 'source-parser';
+type HelidonDocumentSymbol = vscode.DocumentSymbol | vscode.SymbolInformation;
+const SEMANTIC_PATH_PARAMETER_ACCESS_PATTERN =
+	/(?:\.\s*path\s*\(\s*\)\s*\.\s*param|\.\s*pathParameters\s*\(\s*\)\s*\.\s*(?:first|get))\s*\($/su;
 
 export interface HelidonEndpointDiscoveryLogger {
 	appendLine(message: string): void;
@@ -103,6 +106,12 @@ interface PendingRouteDefinition {
 interface ParsedJavaRoutingModel {
 	routes: ParsedRouteDefinition[];
 	registrations: ParsedServiceRegistration[];
+}
+
+export interface HelidonJavaMethodContext {
+	name?: string;
+	line: number;
+	range: vscode.Range;
 }
 
 function normalizeEndpointPathSegment(path: string): string {
@@ -453,8 +462,191 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null;
 }
 
+function isDocumentSymbol(value: unknown): value is vscode.DocumentSymbol {
+	return (
+		isRecord(value)
+		&& value.kind !== undefined
+		&& value.range instanceof vscode.Range
+		&& value.selectionRange instanceof vscode.Range
+		&& Array.isArray(value.children)
+	);
+}
+
+function isSymbolInformation(value: unknown): value is vscode.SymbolInformation {
+	return isRecord(value) && value.kind !== undefined && value.location instanceof vscode.Location;
+}
+
 function isNonNegativeInteger(value: unknown): value is number {
 	return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+function normalizeJavaMemberName(name: string | undefined): string | undefined {
+	if (!name) {
+		return undefined;
+	}
+
+	const trimmed = name.trim();
+	const match = /^([^(:\s]+)/u.exec(trimmed);
+	return match?.[1];
+}
+
+function stringRangeScore(range: vscode.Range): number {
+	return (range.end.line - range.start.line) * 100_000 + (range.end.character - range.start.character);
+}
+
+function escapedCharacterCount(source: string, index: number): number {
+	let count = 0;
+	for (let cursor = index - 1; cursor >= 0 && source[cursor] === '\\'; cursor -= 1) {
+		count += 1;
+	}
+
+	return count;
+}
+
+function lineBounds(source: string, offset: number): { start: number; end: number } {
+	const clampedOffset = Math.max(0, Math.min(offset, source.length));
+	const start = source.lastIndexOf('\n', Math.max(0, clampedOffset - 1)) + 1;
+	const end = source.indexOf('\n', clampedOffset);
+	return {
+		start,
+		end: end === -1 ? source.length : end,
+	};
+}
+
+export function findSemanticPathParameterReference(
+	source: string,
+	offset: number,
+): { value: string; start: number; end: number } | undefined {
+	const { start: lineStart, end: lineEnd } = lineBounds(source, offset);
+	let quoteStart = -1;
+	for (let index = Math.max(lineStart, offset - 1); index >= lineStart; index -= 1) {
+		if (source[index] !== '"' || escapedCharacterCount(source, index) % 2 === 1) {
+			continue;
+		}
+
+		quoteStart = index;
+		break;
+	}
+	if (quoteStart === -1) {
+		return undefined;
+	}
+
+	let quoteEnd = -1;
+	for (let index = quoteStart + 1; index < lineEnd; index += 1) {
+		if (source[index] !== '"' || escapedCharacterCount(source, index) % 2 === 1) {
+			continue;
+		}
+
+		quoteEnd = index;
+		break;
+	}
+	if (quoteEnd === -1 || offset < quoteStart + 1 || offset > quoteEnd) {
+		return undefined;
+	}
+
+	const accessWindowStart = Math.max(0, quoteStart - 512);
+	const accessPrefix = source.slice(accessWindowStart, quoteStart);
+	if (!SEMANTIC_PATH_PARAMETER_ACCESS_PATTERN.test(accessPrefix)) {
+		return undefined;
+	}
+
+	return {
+		value: source.slice(quoteStart + 1, quoteEnd),
+		start: quoteStart + 1,
+		end: quoteEnd,
+	};
+}
+
+async function defaultDocumentSymbolProvider(uri: vscode.Uri): Promise<readonly HelidonDocumentSymbol[]> {
+	return (
+		await vscode.commands.executeCommand<readonly HelidonDocumentSymbol[]>(
+			'vscode.executeDocumentSymbolProvider',
+			uri
+		)
+	) ?? [];
+}
+
+function walkDocumentSymbols(
+	symbols: readonly vscode.DocumentSymbol[],
+	consumer: (symbol: vscode.DocumentSymbol) => void,
+): void {
+	for (const symbol of symbols) {
+		consumer(symbol);
+		walkDocumentSymbols(symbol.children, consumer);
+	}
+}
+
+function javaMethodContextAtPosition(
+	symbols: readonly HelidonDocumentSymbol[],
+	position: vscode.Position,
+): HelidonJavaMethodContext | undefined {
+	let bestMatch: HelidonJavaMethodContext | undefined;
+	const considerMatch = (name: string | undefined, line: number, range: vscode.Range) => {
+		const candidate = {
+			name: normalizeJavaMemberName(name),
+			line,
+			range,
+		};
+		if (!bestMatch || stringRangeScore(candidate.range) < stringRangeScore(bestMatch.range)) {
+			bestMatch = candidate;
+		}
+	};
+
+	for (const symbol of symbols) {
+		if (isDocumentSymbol(symbol)) {
+			walkDocumentSymbols([symbol], (nestedSymbol) => {
+				if (
+					(nestedSymbol.kind === vscode.SymbolKind.Method || nestedSymbol.kind === vscode.SymbolKind.Function)
+					&& nestedSymbol.range.contains(position)
+				) {
+					considerMatch(nestedSymbol.name, nestedSymbol.selectionRange.start.line, nestedSymbol.range);
+				}
+			});
+			continue;
+		}
+
+		if (
+			isSymbolInformation(symbol)
+			&& (symbol.kind === vscode.SymbolKind.Method || symbol.kind === vscode.SymbolKind.Function)
+			&& symbol.location.range.contains(position)
+		) {
+			considerMatch(symbol.name, symbol.location.range.start.line, symbol.location.range);
+		}
+	}
+
+	return bestMatch;
+}
+
+export function findPathParameterEndpointLocations(
+	endpoints: readonly HelidonEndpoint[],
+	parameterName: string,
+	methodContext: HelidonJavaMethodContext,
+): vscode.Location[] {
+	const normalizedMethodName = normalizeJavaMemberName(methodContext.name);
+	const seenLocations = new Set<string>();
+	const locations: vscode.Location[] = [];
+
+	for (const endpoint of endpoints) {
+		if (!endpoint.path.includes(`{${parameterName}}`)) {
+			continue;
+		}
+
+		const matchesMethod =
+			(normalizedMethodName !== undefined && endpoint.methodName === normalizedMethodName)
+			|| endpoint.line === methodContext.line;
+		if (!matchesMethod) {
+			continue;
+		}
+
+		const key = `${endpoint.uri.toString()}#${endpoint.line}`;
+		if (seenLocations.has(key)) {
+			continue;
+		}
+		seenLocations.add(key);
+		locations.push(new vscode.Location(endpoint.uri, new vscode.Range(endpoint.line, 0, endpoint.line, 0)));
+	}
+
+	return locations;
 }
 
 function deserializeEndpoint(value: unknown): HelidonEndpoint | undefined {
@@ -671,7 +863,7 @@ export class HelidonEndpointsTreeDataProvider
 	private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<HelidonEndpointTreeItem | undefined>();
 	readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
 
-	private cachedGroups: HelidonEndpointGroup[] | undefined;
+	private cachedDiscovery: HelidonEndpointDiscoveryResult | undefined;
 	private lastDiscoveryMessage: string | undefined;
 
 	constructor(
@@ -681,7 +873,7 @@ export class HelidonEndpointsTreeDataProvider
 	) {}
 
 	refresh(): void {
-		this.cachedGroups = undefined;
+		this.cachedDiscovery = undefined;
 		this.onDidChangeTreeDataEmitter.fire(undefined);
 	}
 
@@ -690,7 +882,7 @@ export class HelidonEndpointsTreeDataProvider
 	}
 
 	async getChildren(element?: HelidonEndpointTreeItem): Promise<HelidonEndpointTreeItem[]> {
-		const groups = await this.loadGroups();
+		const groups = (await this.loadDiscovery()).groups;
 		if (!element) {
 			return groups.map((group) => new HelidonEndpointGroupItem(group));
 		}
@@ -703,26 +895,30 @@ export class HelidonEndpointsTreeDataProvider
 	}
 
 	async endpointCount(): Promise<number> {
-		const groups = await this.loadGroups();
+		const groups = (await this.loadDiscovery()).groups;
 		return groups.reduce((count, group) => count + group.endpoints.length, 0);
 	}
 
 	async endpointsForDocument(uri: vscode.Uri): Promise<HelidonEndpoint[]> {
-		const groups = await this.loadGroups();
+		const groups = (await this.loadDiscovery()).groups;
 		return groups.flatMap((group) => group.endpoints.filter((endpoint) => endpoint.uri.toString() === uri.toString()));
 	}
 
-	private async loadGroups(): Promise<HelidonEndpointGroup[]> {
-		if (!this.cachedGroups) {
-			const discovery = await discoverHelidonEndpointGroups(this.discoveryOptions);
-			this.cachedGroups = discovery.groups;
+	async discoverySource(): Promise<HelidonEndpointDiscoverySource> {
+		return (await this.loadDiscovery()).source;
+	}
+
+	private async loadDiscovery(): Promise<HelidonEndpointDiscoveryResult> {
+		if (!this.cachedDiscovery) {
+			this.cachedDiscovery = await discoverHelidonEndpointGroups(this.discoveryOptions);
+			const discovery = this.cachedDiscovery;
 			if (this.discoveryOptions.logger && discovery.message !== this.lastDiscoveryMessage) {
 				this.discoveryOptions.logger.appendLine(discovery.message);
 				this.lastDiscoveryMessage = discovery.message;
 			}
 		}
 
-		return this.cachedGroups;
+		return this.cachedDiscovery;
 	}
 }
 
@@ -761,6 +957,30 @@ async function pathParameterReferenceAt(
 	};
 }
 
+async function semanticPathParameterDefinitionLocations(
+	document: vscode.TextDocument,
+	position: vscode.Position,
+	endpointsProvider: Pick<HelidonEndpointsTreeDataProvider, 'endpointsForDocument'>,
+	symbolProvider: (uri: vscode.Uri) => Promise<readonly HelidonDocumentSymbol[]> = defaultDocumentSymbolProvider,
+): Promise<vscode.Location[] | undefined> {
+	const reference = findSemanticPathParameterReference(document.getText(), document.offsetAt(position));
+	if (!reference) {
+		return undefined;
+	}
+
+	const methodContext = javaMethodContextAtPosition(await symbolProvider(document.uri), position);
+	if (!methodContext) {
+		return undefined;
+	}
+
+	const locations = findPathParameterEndpointLocations(
+		await endpointsProvider.endpointsForDocument(document.uri),
+		reference.value,
+		methodContext,
+	);
+	return locations.length > 0 ? locations : undefined;
+}
+
 export class HelidonPathParameterDefinitionProvider implements vscode.DefinitionProvider {
 	constructor(private readonly endpointsProvider: HelidonEndpointsTreeDataProvider) {}
 
@@ -769,6 +989,19 @@ export class HelidonPathParameterDefinitionProvider implements vscode.Definition
 		position: vscode.Position,
 	): Promise<vscode.Definition | undefined> {
 		if (document.languageId !== 'java') {
+			return undefined;
+		}
+
+		const semanticLocations = await semanticPathParameterDefinitionLocations(
+			document,
+			position,
+			this.endpointsProvider,
+		);
+		if (semanticLocations && semanticLocations.length > 0) {
+			return semanticLocations;
+		}
+
+		if ((await this.endpointsProvider.discoverySource()) === 'semantic') {
 			return undefined;
 		}
 
